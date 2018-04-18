@@ -1,5 +1,7 @@
 extern crate blake2;
 
+use std::num::Wrapping;
+
 use self::blake2::{Blake2b, Digest};
 use self::blake2::digest::generic_array::GenericArray;
 use self::blake2::digest::generic_array::typenum::U64;
@@ -52,12 +54,17 @@ pub fn hash_header(header: &[u8]) -> [u64; 4] {
 }
 
 #[inline]
-fn rotl(x: u64, b: u64) -> u64 {
+fn rotl(x: Wrapping<u64>, b: usize) -> Wrapping<u64> {
     return ((x) << (b)) | ((x) >> (64 - (b)));
 }
 
 #[inline]
-fn sipround(v0: &mut u64, v1: &mut u64, v2: &mut u64, v3: &mut u64) {
+fn sipround(
+    v0: &mut Wrapping<u64>,
+    v1: &mut Wrapping<u64>,
+    v2: &mut Wrapping<u64>,
+    v3: &mut Wrapping<u64>,
+) {
     *v0 += *v1;
     *v2 += *v3;
     *v1 = rotl(*v1, 13);
@@ -79,22 +86,22 @@ fn sipround(v0: &mut u64, v1: &mut u64, v2: &mut u64, v3: &mut u64) {
 }
 
 pub fn siphash24(v: [u64; 4], nonce: u64) -> u64 {
-    let mut v0: u64 = v[0];
-    let mut v1: u64 = v[1];
-    let mut v2: u64 = v[2];
-    let mut v3: u64 = v[3] ^ nonce;
+    let mut v0: Wrapping<u64> = Wrapping(v[0]);
+    let mut v1: Wrapping<u64> = Wrapping(v[1]);
+    let mut v2: Wrapping<u64> = Wrapping(v[2]);
+    let mut v3: Wrapping<u64> = Wrapping(v[3] ^ nonce);
 
     sipround(&mut v0, &mut v1, &mut v2, &mut v3);
     sipround(&mut v0, &mut v1, &mut v2, &mut v3);
 
-    v0 ^= nonce;
-    v2 ^= 0xff;
+    v0 ^= Wrapping(nonce);
+    v2 ^= Wrapping(0xff);
 
     sipround(&mut v0, &mut v1, &mut v2, &mut v3);
     sipround(&mut v0, &mut v1, &mut v2, &mut v3);
     sipround(&mut v0, &mut v1, &mut v2, &mut v3);
     sipround(&mut v0, &mut v1, &mut v2, &mut v3);
-    return (v0 ^ v1) ^ (v2 ^ v3);
+    return ((v0 ^ v1) ^ (v2 ^ v3)).0;
 }
 
 pub fn sipnode(v: [u64; 4], nonce: i32, uorv: i32) -> i32 {

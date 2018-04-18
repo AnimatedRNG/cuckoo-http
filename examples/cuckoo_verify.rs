@@ -46,6 +46,5 @@ fn main() {
     let v = cuckoo::hash_header(header.as_bytes());
 
     println!("V: {:?}", v);
-    println!("siphash24: {:?}", cuckoo::siphash24(v, 15));
     cuckoo::verify(v, nonces, easiness);
 }
