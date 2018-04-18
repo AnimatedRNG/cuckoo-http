@@ -43,15 +43,8 @@ fn main() {
     nonces.copy_from_slice(&mut raw_nonces);
 
     let easiness: i32 = ((easipct as i64 * NNODES as i64) / 100) as i32;
-    //let v = cuckoo::hash_header(header.as_bytes());
-    let v = [
-        1449310910991872227,
-        2646268962349054874,
-        5517924826087534119,
-        6176777564751238564,
-    ];
+    let v = cuckoo::hash_header(header.as_bytes());
 
-    //println!("V: {:?}", v);
     let result = cuckoo::verify(v, nonces, easiness);
     if result {
         println!("Verified!");
