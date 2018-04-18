@@ -1,0 +1,12 @@
+[package]
+name = "cuckoo_http"
+version = "0.1.0"
+authors = ["Srinivas Kaza <kaza@mit.edu>"]
+
+[lib]
+name = "cuckoo_http"
+path = "src/lib.rs"
+
+[dependencies]
+blake2 = "0.7"
+digest = { version = "0.7", features = ["std"]}
