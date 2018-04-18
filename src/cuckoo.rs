@@ -160,7 +160,7 @@ pub fn verify(v: [u64; 4], nonces: [i32; PROOFSIZE], easiness: i32) -> bool {
         }
         n -= 2;
 
-        if i != 0 {
+        if i == 0 {
             break;
         }
     }
