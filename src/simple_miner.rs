@@ -9,16 +9,16 @@ use cuckoo::Edge;
 use cuckoo::sipedge;
 
 struct CuckooSolve<'a> {
-    graph_v: [i64; 4],
+    graph_v: [u64; 4],
     easiness: i32,
-    cuckoo: [usize; 1 + NNODES],
+    cuckoo: [usize; (1 + NNODES) as usize],
     sols: &'a [[i32; PROOFSIZE]],
     nsols: usize,
     nthreads: usize,
 }
 
 // Refactor sometime
-fn path(v: CuckooSolve, mut u: usize, us: &mut [usize; 1 + NNODES]) -> Option<usize> {
+fn path(v: CuckooSolve, mut u: i32, us: &mut [i32; (1 + NNODES) as usize]) -> Option<usize> {
     let mut nu: usize = 0;
     while u != 0 {
         nu += 1;
@@ -34,7 +34,7 @@ fn path(v: CuckooSolve, mut u: usize, us: &mut [usize; 1 + NNODES]) -> Option<us
             return Option::None;
         }
         us[nu] = u;
-        u = v.cuckoo[u];
+        u = v.cuckoo[u as usize] as i32;
     }
 
     return Some(nu);
@@ -42,12 +42,12 @@ fn path(v: CuckooSolve, mut u: usize, us: &mut [usize; 1 + NNODES]) -> Option<us
 
 fn solution(
     v: CuckooSolve,
-    us: &mut [usize; 1 + NNODES],
-    nu: usize,
-    vs: [usize; MAXPATHLEN],
-    nv: usize,
+    us: &mut [i32; (1 + NNODES) as usize],
+    mut nu: i32,
+    vs: [i32; MAXPATHLEN],
+    mut nv: i32,
 ) {
-    let cycle: HashSet<Edge> = HashSet::new();
+    let mut cycle: HashSet<Edge> = HashSet::new();
     let mut n = 0;
 
     cycle.insert(Edge {
@@ -57,22 +57,22 @@ fn solution(
     while nu != 0 {
         nu -= 1;
         cycle.insert(Edge {
-            u: us[(nu + 1) & !1],
-            v: us[nu | 1] - NEDGES,
+            u: us[((nu + 1) & !1) as usize],
+            v: us[(nu | 1) as usize] - NEDGES,
         });
     }
     while nv != 0 {
         nv -= 1;
         cycle.insert(Edge {
-            u: vs[nv | 1],
-            v: vs[(nv + 1) & !1] - NEDGES,
+            u: vs[(nv | 1) as usize],
+            v: vs[((nv + 1) & !1) as usize] - NEDGES,
         });
     }
 
     n = 0;
     for nonce in 0..v.easiness {
-        let e = sipedge(v, nonce);
-        if cycle.contains(e) {
+        let e = sipedge(v.graph_v, nonce);
+        if cycle.contains(&e) {
             v.sols[v.nsols][n] = nonce;
             n += 1;
         }

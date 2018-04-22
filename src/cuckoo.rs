@@ -9,9 +9,9 @@ use self::blake2::digest::generic_array::GenericArray;
 use self::blake2::digest::generic_array::typenum::U64;
 
 pub const EDGEBITS: i32 = 19;
-pub const NEDGES: usize = 1 << EDGEBITS;
+pub const NEDGES: i32 = 1 << EDGEBITS;
 pub const NODEBITS: i32 = EDGEBITS + 1;
-pub const NNODES: usize = 1 << NODEBITS;
+pub const NNODES: i32 = 1 << NODEBITS;
 pub const EDGEMASK: i32 = NEDGES - 1;
 pub const PROOFSIZE: usize = 42;
 
