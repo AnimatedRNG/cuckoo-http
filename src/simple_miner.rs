@@ -1,6 +1,9 @@
 const MAXPATHLEN: usize = 4096;
 
 use std::collections::HashSet;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc;
+use std::thread;
 
 use cuckoo::NNODES;
 use cuckoo::NEDGES;
@@ -8,11 +11,13 @@ use cuckoo::PROOFSIZE;
 use cuckoo::Edge;
 use cuckoo::sipedge;
 
+type Proof = [i32; PROOFSIZE];
+
 struct CuckooSolve<'a> {
     graph_v: [u64; 4],
     easiness: i32,
     cuckoo: [usize; (1 + NNODES) as usize],
-    sols: &'a [[i32; PROOFSIZE]],
+    sols: &'a [Proof],
     nsols: usize,
     nthreads: usize,
 }
@@ -42,6 +47,7 @@ fn path(v: CuckooSolve, mut u: i32, us: &mut [i32; (1 + NNODES) as usize]) -> Op
 
 fn solution(
     v: CuckooSolve,
+    tx: &Sender<Proof>,
     us: &mut [i32; (1 + NNODES) as usize],
     mut nu: i32,
     vs: [i32; MAXPATHLEN],
@@ -84,4 +90,4 @@ fn solution(
     }
 }
 
-fn solve(v: CuckooSolve, id: i32) {}
+fn solve(v: CuckooSolve, id: i32, tx: Sender<Proof>) {}
