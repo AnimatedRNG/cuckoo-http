@@ -13,12 +13,10 @@ use cuckoo::sipedge;
 
 type Proof = [i32; PROOFSIZE];
 
-struct CuckooSolve<'a> {
+struct CuckooSolve {
     graph_v: [u64; 4],
     easiness: i32,
     cuckoo: [usize; (1 + NNODES) as usize],
-    sols: &'a [Proof],
-    nsols: usize,
     nthreads: usize,
 }
 
@@ -48,13 +46,12 @@ fn path(v: CuckooSolve, mut u: i32, us: &mut [i32; (1 + NNODES) as usize]) -> Op
 fn solution(
     v: CuckooSolve,
     tx: &Sender<Proof>,
-    us: &mut [i32; (1 + NNODES) as usize],
+    us: [i32; (1 + NNODES) as usize],
     mut nu: i32,
     vs: [i32; MAXPATHLEN],
     mut nv: i32,
 ) {
     let mut cycle: HashSet<Edge> = HashSet::new();
-    let mut n = 0;
 
     cycle.insert(Edge {
         u: us[0] as i32,
@@ -75,16 +72,17 @@ fn solution(
         });
     }
 
-    n = 0;
+    let mut new_proof = [0; PROOFSIZE];
+    let mut n = 0;
     for nonce in 0..v.easiness {
         let e = sipedge(v.graph_v, nonce);
         if cycle.contains(&e) {
-            v.sols[v.nsols][n] = nonce;
+            new_proof[n] = nonce;
             n += 1;
         }
     }
     if n == PROOFSIZE {
-        v.nsols += 1;
+        tx.send(new_proof).unwrap();
     } else {
         println!("Only recovered {:?} nonces", n)
     }
