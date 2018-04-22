@@ -1,5 +1,7 @@
 extern crate blake2;
 
+use std::hash::Hasher;
+use std::hash::Hash;
 use std::num::Wrapping;
 
 use self::blake2::{Blake2b, Digest};
@@ -7,9 +9,9 @@ use self::blake2::digest::generic_array::GenericArray;
 use self::blake2::digest::generic_array::typenum::U64;
 
 pub const EDGEBITS: i32 = 19;
-pub const NEDGES: i32 = 1 << EDGEBITS;
+pub const NEDGES: usize = 1 << EDGEBITS;
 pub const NODEBITS: i32 = EDGEBITS + 1;
-pub const NNODES: i32 = 1 << NODEBITS;
+pub const NNODES: usize = 1 << NODEBITS;
 pub const EDGEMASK: i32 = NEDGES - 1;
 pub const PROOFSIZE: usize = 42;
 
@@ -19,15 +21,17 @@ pub struct Edge {
     pub v: i32,
 }
 
-impl Edge {
-    pub fn hashcode(&self) -> i32 {
-        return self.u ^ self.v;
-    }
-}
-
 impl PartialEq for Edge {
     fn eq(&self, other: &Edge) -> bool {
         return self.u == other.u && self.v == other.v;
+    }
+}
+
+impl Hash for Edge {
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        //return self.u ^ self.v;
+        self.u.hash(hasher);
+        self.v.hash(hasher);
     }
 }
 
