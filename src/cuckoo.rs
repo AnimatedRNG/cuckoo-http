@@ -1,12 +1,12 @@
 extern crate blake2;
 
-use std::hash::Hasher;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::num::Wrapping;
 
-use self::blake2::{Blake2b, Digest};
 use self::blake2::digest::generic_array::GenericArray;
 use self::blake2::digest::generic_array::typenum::U64;
+use self::blake2::{Blake2b, Digest};
 
 pub const EDGEBITS: i32 = 19;
 pub const NEDGES: i32 = 1 << EDGEBITS;
