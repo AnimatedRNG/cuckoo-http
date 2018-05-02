@@ -2,9 +2,6 @@ const MAXPATHLEN: usize = 4096;
 
 use std::cmp::min as _min;
 use std::collections::HashSet;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::thread;
 
 use cuckoo::Edge;
 use cuckoo::NEDGES;
@@ -20,7 +17,6 @@ pub struct CuckooSolve {
     pub graph_v: [u64; 4],
     pub easiness: i32,
     pub cuckoo: Vec<i32>,
-    pub nthreads: usize,
 }
 
 // Refactor sometime
@@ -48,12 +44,11 @@ fn path(v: &CuckooSolve, mut u: i32, us: &mut [i32; MAXPATHLEN]) -> Option<usize
 
 fn solution(
     v: &CuckooSolve,
-    tx: &Sender<Proof>,
     us: [i32; MAXPATHLEN],
     mut nu: i32,
     vs: [i32; MAXPATHLEN],
     mut nv: i32,
-) {
+) -> [i32; PROOFSIZE] {
     let mut cycle: HashSet<Edge> = HashSet::new();
 
     cycle.insert(Edge {
@@ -84,18 +79,16 @@ fn solution(
             n += 1;
         }
     }
-    if n == PROOFSIZE {
-        //tx.send(new_proof).unwrap();
-    } else {
+    if n != PROOFSIZE {
         println!("Only recovered {:?} nonces", n)
     }
+    return new_proof;
 }
 
-pub fn solve(mut cs: CuckooSolve, id: i32, tx: Sender<Proof>) {
+pub fn solve(mut cs: CuckooSolve) -> Option<[i32; PROOFSIZE]> {
     let mut us: [i32; MAXPATHLEN] = [0; MAXPATHLEN];
     let mut vs: [i32; MAXPATHLEN] = [0; MAXPATHLEN];
-    let mut nonce = id;
-    while nonce < cs.easiness {
+    for nonce in 0..cs.easiness {
         us[0] = sipnode(cs.graph_v, nonce, 0);
         vs[0] = NEDGES + sipnode(cs.graph_v, nonce, 1);
 
@@ -103,7 +96,6 @@ pub fn solve(mut cs: CuckooSolve, id: i32, tx: Sender<Proof>) {
         let v = cs.cuckoo[vs[0] as usize];
 
         if u == vs[0] || v == us[0] {
-            nonce += cs.nthreads as i32;
             continue;
         }
 
@@ -111,7 +103,6 @@ pub fn solve(mut cs: CuckooSolve, id: i32, tx: Sender<Proof>) {
         let nv_raw = path(&cs, v, &mut vs);
 
         if nu_raw.is_none() || nv_raw.is_none() {
-            nonce += cs.nthreads as i32;
             continue;
         }
 
@@ -137,10 +128,9 @@ pub fn solve(mut cs: CuckooSolve, id: i32, tx: Sender<Proof>) {
                 id
             );*/
             if len == (PROOFSIZE as i32) {
-                //solution(&cs, &tx, us, nu, vs, nv);
+                return Some(solution(&cs, us, nu, vs, nv));
             }
 
-            nonce += cs.nthreads as i32;
             continue;
         }
         if nu < nv {
@@ -156,21 +146,6 @@ pub fn solve(mut cs: CuckooSolve, id: i32, tx: Sender<Proof>) {
             }
             cs.cuckoo[vs[0] as usize] = us[0];
         }
-
-        nonce += cs.nthreads as i32;
     }
-}
-
-pub fn run_simple_miner(mut cs: CuckooSolve) {
-    let (tx, _) = mpsc::channel();
-    let mut join_handles = Vec::new();
-    for i in 0..cs.nthreads {
-        let new_tx = tx.clone();
-        let new_cs = cs.clone();
-        join_handles.push(thread::spawn(move || solve(new_cs, i as i32, new_tx)));
-    }
-
-    for handle in join_handles {
-        handle.join().unwrap();
-    }
+    return None;
 }

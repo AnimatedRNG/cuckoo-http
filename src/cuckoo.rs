@@ -8,7 +8,7 @@ use self::blake2::digest::generic_array::GenericArray;
 use self::blake2::digest::generic_array::typenum::U64;
 use self::blake2::{Blake2b, Digest};
 
-pub const EDGEBITS: i32 = 19;
+pub const EDGEBITS: i32 = 25;
 pub const NEDGES: i32 = 1 << EDGEBITS;
 pub const NODEBITS: i32 = EDGEBITS + 1;
 pub const NNODES: i32 = 1 << NODEBITS;
