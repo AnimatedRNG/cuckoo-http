@@ -1,19 +1,20 @@
-extern crate blake2;
+use blake2::digest::generic_array::GenericArray;
+use blake2::digest::generic_array::typenum::U64;
+use blake2::{Blake2b, Digest};
 
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::Wrapping;
+use std::u64;
 
-use self::blake2::digest::generic_array::GenericArray;
-use self::blake2::digest::generic_array::typenum::U64;
-use self::blake2::{Blake2b, Digest};
-
-pub const EDGEBITS: i32 = 25;
+pub const EDGEBITS: i32 = 22;
 pub const NEDGES: i32 = 1 << EDGEBITS;
 pub const NODEBITS: i32 = EDGEBITS + 1;
 pub const NNODES: i32 = 1 << NODEBITS;
 pub const EDGEMASK: i32 = NEDGES - 1;
 pub const PROOFSIZE: usize = 42;
+
+pub type Proof = [i32; PROOFSIZE];
 
 #[derive(Debug, Eq)]
 pub struct Edge {
@@ -55,6 +56,32 @@ pub fn hash_header(header: &[u8]) -> [u64; 4] {
         u8to64(result, 16),
         u8to64(result, 24),
     ];
+}
+
+pub fn proof_satisfies_difficulty(proof: &Proof, difficulty: u64) -> bool {
+    let mut hasher = Blake2b::new();
+    let mut p8 = Vec::new();
+    for i in proof.iter() {
+        let i_be = i.to_be();
+        let new_bytes = vec![
+            ((i_be >> 24) & 0xff) as u8,
+            ((i_be >> 16) & 0xff) as u8,
+            ((i_be >> 8) & 0xff) as u8,
+            (i_be & 0xff) as u8,
+        ];
+        p8.extend(new_bytes);
+    }
+    hasher.input(&p8);
+
+    let result = hasher.result();
+
+    // This is not ideal, but works
+    let mut acc: u64 = 0;
+    for i in 0..8 {
+        acc |= u8(result[i * 4]) << (i * 8);
+    }
+
+    return acc < difficulty;
 }
 
 #[inline]
@@ -119,7 +146,11 @@ pub fn sipedge(v: [u64; 4], nonce: i32) -> Edge {
     };
 }
 
-pub fn verify(v: [u64; 4], nonces: [i32; PROOFSIZE], easiness: i32) -> bool {
+pub fn verify(v: [u64; 4], nonces: Proof, easiness: i32, hash_difficulty: u64) -> bool {
+    if !proof_satisfies_difficulty(&nonces, hash_difficulty) {
+        return false;
+    }
+
     let mut us: [i32; PROOFSIZE] = [0; PROOFSIZE];
     let mut vs: [i32; PROOFSIZE] = [0; PROOFSIZE];
 

@@ -5,17 +5,16 @@ use std::collections::HashSet;
 
 use cuckoo::Edge;
 use cuckoo::NEDGES;
-use cuckoo::NNODES;
 use cuckoo::PROOFSIZE;
+use cuckoo::proof_satisfies_difficulty;
 use cuckoo::sipedge;
 use cuckoo::sipnode;
-
-type Proof = [i32; PROOFSIZE];
 
 #[derive(Clone)]
 pub struct CuckooSolve {
     pub graph_v: [u64; 4],
     pub easiness: i32,
+    pub hash_difficulty: u64,
     pub cuckoo: Vec<i32>,
 }
 
@@ -48,7 +47,7 @@ fn solution(
     mut nu: i32,
     vs: [i32; MAXPATHLEN],
     mut nv: i32,
-) -> [i32; PROOFSIZE] {
+) -> Option<[i32; PROOFSIZE]> {
     let mut cycle: HashSet<Edge> = HashSet::new();
 
     cycle.insert(Edge {
@@ -79,10 +78,15 @@ fn solution(
             n += 1;
         }
     }
+
     if n != PROOFSIZE {
-        println!("Only recovered {:?} nonces", n)
+        println!("Only recovered {:?} nonces", n);
+        return None;
+    } else if proof_satisfies_difficulty(&new_proof, v.hash_difficulty) {
+        return Some(new_proof);
+    } else {
+        return None;
     }
-    return new_proof;
 }
 
 pub fn solve(mut cs: CuckooSolve) -> Option<[i32; PROOFSIZE]> {
@@ -122,13 +126,20 @@ pub fn solve(mut cs: CuckooSolve) -> Option<[i32; PROOFSIZE]> {
 
             let len = nu + nv + 1;
             /*println!(
-                "{}-cycle found at {}% for id={}",
+                "{}-cycle found at {}%",
                 len,
                 (nonce * 100) / cs.easiness,
-                id
             );*/
             if len == (PROOFSIZE as i32) {
-                return Some(solution(&cs, us, nu, vs, nv));
+                let sol = solution(&cs, us, nu, vs, nv);
+                if sol.is_some() {
+                    return sol;
+                } else {
+                    println!(
+                        "Found a sol at {}%, but it did not satisfy the difficulty",
+                        (nonce * 100) / cs.easiness,
+                    );
+                }
             }
 
             continue;
