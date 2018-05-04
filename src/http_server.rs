@@ -10,11 +10,43 @@ const BUF_SIZE: usize = 8192;
 const CONTENT_LENGTH: &[u8] = b"Content-Length:";
 const HEADER_END: &[u8] = b"\n\r\n";
 
-struct HTTPRead {
+struct TCPRead {
     tcp_stream: TcpStream,
     buf: [u8; BUF_SIZE],
     buf_ptr: usize,
     end_of_read: usize,
+    offset: usize,
+}
+
+impl TCPRead {
+    #[inline]
+    fn get(&mut self) -> Option<u8> {
+        if self.buf_ptr == self.end_of_read {
+            match self.tcp_stream.read(&mut self.buf) {
+                Err(_) => {
+                    self.tcp_stream.shutdown(Shutdown::Both).unwrap();
+                    return None;
+                }
+                Ok(n) => {
+                    self.buf_ptr = 0;
+                    self.offset += self.end_of_read;
+                    self.end_of_read = n;
+                }
+            };
+        }
+
+        let c = self.buf[self.buf_ptr];
+        self.buf_ptr += 1;
+        Some(c)
+    }
+
+    fn ptr(&self) -> usize {
+        self.offset + self.buf_ptr
+    }
+}
+
+struct HTTPRead {
+    tcp_read: TCPRead,
     max_len: usize,
 
     content_length_ptr: usize,
@@ -32,11 +64,14 @@ struct HTTPRead {
 impl HTTPRead {
     fn new(tcp_stream: TcpStream, max_len: usize) -> HTTPRead {
         HTTPRead {
-            tcp_stream: tcp_stream,
-            buf: [0; BUF_SIZE],
+            tcp_read: TCPRead {
+                tcp_stream: tcp_stream,
+                buf: [0; BUF_SIZE],
+                buf_ptr: 0,
+                end_of_read: 0,
+                offset: 0,
+            },
             max_len: max_len,
-            buf_ptr: 0,
-            end_of_read: 0,
 
             content_length_ptr: 0,
             content_length: None,
@@ -48,18 +83,6 @@ impl HTTPRead {
             in_body: false,
 
             end_ptr: 0,
-        }
-    }
-
-    fn fetch_new_data(&mut self, buf: &mut [u8]) -> Option<usize> {
-        match self.tcp_stream.read(buf) {
-            Err(_) => {
-                self.tcp_stream.shutdown(Shutdown::Both).unwrap();
-                return None;
-            }
-            Ok(n) => {
-                return Some(n);
-            }
         }
     }
 
@@ -93,8 +116,8 @@ impl HTTPRead {
                     self.in_content_length = false;
                 } else if *c == b'\r' {
                     let mut accum: usize = 0;
-                    for ci in self.tmp_content_length_buffer {
-                        if ci >= b'0' && ci <= b'9' {
+                    for ci in &self.tmp_content_length_buffer {
+                        if *ci >= b'0' && *ci <= b'9' {
                             accum += ((ci - b'0') as usize) + accum * 10;
                         }
                     }
@@ -112,44 +135,42 @@ impl Iterator for HTTPRead {
     type Item = String;
 
     fn next(&mut self) -> Option<String> {
-        let result: Vec<u8> = Vec::new();
-        if self.buf_ptr == self.end_of_read {
-            // We should do a new read here
-            self.buf_ptr = 0;
+        let mut result: Vec<u8> = Vec::new();
 
-            let new_buf_raw = self.fetch_new_data(&mut self.buf);
-            if new_buf_raw.is_none() {
+        self.content_length_ptr = 0;
+        self.rest_of_http_header = 0;
+        self.end_ptr = 0;
+
+        let mut i = self.tcp_read.ptr();
+        loop {
+            let c_raw = self.tcp_read.get();
+            if c_raw == None {
                 return None;
             }
-            self.end_of_read = new_buf_raw.unwrap();
+            let c = c_raw.unwrap();
+            result.push(c);
 
-            self.content_length_ptr = 0;
-            self.rest_of_http_header = 0;
-            self.end_ptr = 0;
-            for i in self.buf_ptr..self.end_of_read {
-                let c = self.buf[i];
-                result.push(c);
-
-                if self.content_length.is_none() {
-                    self.read_content_header(&c);
+            if self.content_length.is_none() {
+                self.read_content_header(&c);
+            } else {
+                let cl = self.content_length.unwrap();
+                if self.reached_content_length_but_not_body {
+                    self.read_until_body(&c);
                 } else {
-                    let cl = self.content_length.unwrap();
-                    if self.reached_content_length_but_not_body {
-                        self.read_until_body(&c);
-                    } else {
-                        if self.in_body {
-                            if i >= self.end_ptr {
-                                break;
-                            }
-                        } else {
-                            self.end_ptr = i + cl;
+                    if self.in_body {
+                        if i >= self.end_ptr {
+                            break;
                         }
+                    } else {
+                        self.end_ptr = i + cl;
                     }
                 }
             }
 
-            return None;
+            i += 1;
         }
+
+        return None;
     }
 }
 
@@ -162,9 +183,6 @@ fn handle_client(mut client_stream: TcpStream) {
         .unwrap();
 
     let mut buffered = BufReader::new(&client_stream);
-
-    let mut callbacks_handler = CuckooHttpHandler {};
-    let mut parser = Parser::request();
 
     let mut current_buf = Vec::new();
 
@@ -179,8 +197,6 @@ fn handle_client(mut client_stream: TcpStream) {
         }
 
         let sz = n.unwrap();
-
-        parser.parse(&mut callbacks_handler, &current_buf);
     }
 }
 
