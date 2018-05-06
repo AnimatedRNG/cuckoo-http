@@ -54,6 +54,7 @@ enum ContentLengthState {
 }
 
 enum HTTPReadState {
+    READING_METHOD,
     READING_CONTENT_LENGTH,
     READING_UNTIL_BODY,
     READING_BODY,
@@ -189,7 +190,7 @@ impl<'a> HTTPRead {
         self.content_length_ptr = 0;
         self.rest_of_http_header = 0;
         self.end_ptr = 0;
-        self.read_state = HTTPReadState::READING_CONTENT_LENGTH;
+        self.read_state = HTTPReadState::READING_METHOD;
 
         let mut i = self.tcp_read.ptr();
         loop {
@@ -205,6 +206,14 @@ impl<'a> HTTPRead {
             println!("{:?}", str::from_utf8(&result).unwrap());
 
             match self.read_state {
+                HTTPReadState::READING_METHOD => {
+                    if c == b' ' || c == b'\t' {
+                        if result == b"GET " {
+                            self.content_length = Some(0);
+                            self.read_state = HTTPReadState::READING_UNTIL_BODY;
+                        }
+                    }
+                }
                 HTTPReadState::READING_CONTENT_LENGTH => {
                     self.read_content_header(&c);
                     if self.content_length.is_some() {
@@ -215,6 +224,12 @@ impl<'a> HTTPRead {
                     let cl = self.content_length.unwrap();
                     println!("Content length: {:?}", cl);
                     if self.read_until_body(&c) {
+                        if cl == 0 {
+                            println!("Done!");
+                            self.read_state = HTTPReadState::READING_METHOD;
+                            break;
+                        }
+
                         self.end_ptr = i + cl;
                         self.read_state = HTTPReadState::READING_BODY;
                     }
@@ -223,6 +238,7 @@ impl<'a> HTTPRead {
                     //println!("end_ptr is {:?}, i is {:?}", i, self.end_ptr);
                     if i >= self.end_ptr - 1 {
                         println!("Done!");
+                        self.read_state = HTTPReadState::READING_METHOD;
                         break;
                     }
                 }
@@ -278,7 +294,9 @@ fn handle_client(mut client_stream: TcpStream) {
                         h.close();
                     }
 
-                // Then drop the connection
+                    // Then drop the connection
+                    h.close();
+                    return;
                 } else {
                     // Forward it to the server
                 }
@@ -327,9 +345,18 @@ mod tests {
     }
 
     #[test]
-    fn standard_read_works() {
+    fn get_works() {
         let tx = set_up_connection();
-        tx.send(b"GET / HTTP/1.1\r\nContent-Length: 10\r\n\r\n012345789".to_vec())
+        tx.send(b"GET / HTTP/1.1\r\nContent-Length: 10\r\n\r\n".to_vec())
+            .unwrap();
+
+        thread::sleep(Duration::new(3, 0));
+    }
+
+    #[test]
+    fn post_works() {
+        let tx = set_up_connection();
+        tx.send(b"POST / HTTP/1.1\r\nContent-Length: 10\r\n\r\n{fdfafa}".to_vec())
             .unwrap();
 
         thread::sleep(Duration::new(3, 0));
