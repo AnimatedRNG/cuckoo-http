@@ -36,6 +36,7 @@ impl TCPRead {
         }
 
         let c = self.buf[self.buf_ptr];
+        println!("Did TCP read, read {:?} at {:?}", c as char, self.buf_ptr);
         self.buf_ptr += 1;
         Some(c)
     }
@@ -45,18 +46,30 @@ impl TCPRead {
     }
 }
 
+enum ContentLengthState {
+    READING_NAME,
+    READING_WHITESPACE,
+    READING_NUMBER,
+}
+
+enum HTTPReadState {
+    READING_CONTENT_LENGTH,
+    READING_UNTIL_BODY,
+    READING_BODY,
+}
+
 struct HTTPRead {
     tcp_read: TCPRead,
     max_len: usize,
 
     content_length_ptr: usize,
     content_length: Option<usize>,
-    in_content_length: bool,
     tmp_content_length_buffer: Vec<u8>,
+    content_length_state: ContentLengthState,
 
-    reached_content_length_but_not_body: bool,
+    read_state: HTTPReadState,
+
     rest_of_http_header: usize,
-    in_body: bool,
 
     end_ptr: usize,
 }
@@ -75,71 +88,101 @@ impl HTTPRead {
 
             content_length_ptr: 0,
             content_length: None,
-            in_content_length: false,
             tmp_content_length_buffer: Vec::new(),
+            content_length_state: ContentLengthState::READING_NAME,
 
-            reached_content_length_but_not_body: false,
+            read_state: HTTPReadState::READING_CONTENT_LENGTH,
+
             rest_of_http_header: 0,
-            in_body: false,
 
             end_ptr: 0,
         }
     }
 
-    fn read_until_body(&mut self, c: &u8) {
-        if self.rest_of_http_header < HEADER_END.len() {
-            if *c == HEADER_END[self.rest_of_http_header] {
-                self.rest_of_http_header += 1;
-            } else {
-                self.rest_of_http_header = 0;
-            }
+    fn read_until_body(&mut self, c: &u8) -> bool {
+        if *c == HEADER_END[self.rest_of_http_header] {
+            self.rest_of_http_header += 1;
         } else {
             self.rest_of_http_header = 0;
-            self.reached_content_length_but_not_body = false;
+        }
+
+        if self.rest_of_http_header == HEADER_END.len() {
+            self.rest_of_http_header = 0;
+            println!("Found body!");
+            return true;
+        } else {
+            return false;
         }
     }
 
     fn read_content_header(&mut self, c: &u8) {
-        if self.content_length_ptr < CONTENT_LENGTH.len() {
-            if *c == CONTENT_LENGTH[self.content_length_ptr] {
-                self.content_length_ptr += 1;
-            } else {
-                self.content_length_ptr = 0;
+        self.content_length_state = match self.content_length_state {
+            ContentLengthState::READING_NAME => {
+                if self.content_length_ptr >= CONTENT_LENGTH.len() {
+                    self.content_length_ptr = 0;
+                    ContentLengthState::READING_WHITESPACE
+                } else {
+                    ContentLengthState::READING_NAME
+                }
             }
-        } else {
-            if *c == b' ' || *c == b'\t' {
-                self.content_length_ptr += 1;
-                self.in_content_length = true;
-            } else {
-                if self.in_content_length {
-                    self.tmp_content_length_buffer.push(*c);
-                    self.in_content_length = false;
-                } else if *c == b'\r' {
+            ContentLengthState::READING_WHITESPACE => {
+                if *c != b' ' && *c != b'\t' {
+                    ContentLengthState::READING_NUMBER
+                } else {
+                    ContentLengthState::READING_WHITESPACE
+                }
+            }
+            ContentLengthState::READING_NUMBER => {
+                if *c == b'\r' {
                     let mut accum: usize = 0;
                     for ci in &self.tmp_content_length_buffer {
                         if *ci >= b'0' && *ci <= b'9' {
-                            accum += ((ci - b'0') as usize) + accum * 10;
+                            accum = ((ci - b'0') as usize) + accum * 10;
                         }
                     }
+
                     self.tmp_content_length_buffer.clear();
                     self.content_length = Some(accum);
-                    self.reached_content_length_but_not_body = true;
                     self.content_length_ptr = 0;
                 }
+                ContentLengthState::READING_NUMBER
             }
-        }
+        };
+
+        match self.content_length_state {
+            ContentLengthState::READING_NAME => {
+                if self.content_length_ptr < CONTENT_LENGTH.len() {
+                    if *c == CONTENT_LENGTH[self.content_length_ptr] {
+                        self.content_length_ptr += 1;
+                    } else {
+                        self.content_length_ptr = 0;
+                    }
+                }
+            }
+            ContentLengthState::READING_WHITESPACE => {
+                //if *c == b' ' || *c == b'\t' {
+                //self.content_length_ptr += 1;
+                //}
+            }
+            ContentLengthState::READING_NUMBER => {
+                if *c != b'\r' {
+                    self.tmp_content_length_buffer.push(*c);
+                }
+            }
+        };
     }
 }
 
 impl Iterator for HTTPRead {
-    type Item = String;
+    type Item = Vec<u8>;
 
-    fn next(&mut self) -> Option<String> {
+    fn next(&mut self) -> Option<Vec<u8>> {
         let mut result: Vec<u8> = Vec::new();
 
         self.content_length_ptr = 0;
         self.rest_of_http_header = 0;
         self.end_ptr = 0;
+        self.read_state = HTTPReadState::READING_CONTENT_LENGTH;
 
         let mut i = self.tcp_read.ptr();
         loop {
@@ -150,27 +193,34 @@ impl Iterator for HTTPRead {
             let c = c_raw.unwrap();
             result.push(c);
 
-            if self.content_length.is_none() {
-                self.read_content_header(&c);
-            } else {
-                let cl = self.content_length.unwrap();
-                if self.reached_content_length_but_not_body {
-                    self.read_until_body(&c);
-                } else {
-                    if self.in_body {
-                        if i >= self.end_ptr {
-                            break;
-                        }
-                    } else {
-                        self.end_ptr = i + cl;
+            i += 1;
+
+            match self.read_state {
+                HTTPReadState::READING_CONTENT_LENGTH => {
+                    self.read_content_header(&c);
+                    if self.content_length.is_some() {
+                        self.read_state = HTTPReadState::READING_UNTIL_BODY;
                     }
                 }
-            }
-
-            i += 1;
+                HTTPReadState::READING_UNTIL_BODY => {
+                    let cl = self.content_length.unwrap();
+                    println!("Content length: {:?}", cl);
+                    if self.read_until_body(&c) {
+                        self.end_ptr = i + cl;
+                        self.read_state = HTTPReadState::READING_BODY;
+                    }
+                }
+                HTTPReadState::READING_BODY => {
+                    println!("end_ptr is {:?}, i is {:?}", i, self.end_ptr);
+                    if i >= self.end_ptr - 1 {
+                        println!("Done!");
+                        break;
+                    }
+                }
+            };
         }
 
-        return None;
+        return Some(result);
     }
 }
 
@@ -182,31 +232,52 @@ fn handle_client(mut client_stream: TcpStream) {
         .set_write_timeout(Some(Duration::new(5, 0)))
         .unwrap();
 
-    let mut buffered = BufReader::new(&client_stream);
-
-    let mut current_buf = Vec::new();
+    let mut h = HTTPRead::new(client_stream, BUF_SIZE);
 
     loop {
-        let n = buffered.read_until(b'\n', &mut current_buf);
-
-        // If for some reason we can't read, then close the
-        // connection.
-        if n.is_err() {
-            client_stream.shutdown(Shutdown::Both).unwrap();
-            return;
-        }
-
-        let sz = n.unwrap();
+        h.next();
     }
 }
 
 fn server_thread(local_ip: String) {
     let listener = TcpListener::bind(local_ip.clone()).unwrap();
-    println!("Started listening on {}", &local_ip);
     for stream in listener.incoming() {
         if stream.is_err() {
             continue;
         }
         thread::spawn(|| handle_client(stream.unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use http_server::server_thread;
+    use std::io::Write;
+    use std::net::TcpStream;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+    use std::vec::Vec;
+
+    fn set_up_connection() -> mpsc::Sender<Vec<u8>> {
+        thread::spawn(|| server_thread("127.0.0.1:8080".to_string()));
+        let (tx, rx): (mpsc::Sender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) = mpsc::channel();
+        thread::spawn(move || {
+            let mut s = TcpStream::connect("127.0.0.1:8080").unwrap();
+            for a in rx.iter() {
+                s.write(&a).unwrap();
+                s.flush().unwrap();
+            }
+        });
+        tx
+    }
+
+    #[test]
+    fn standard_read_works() {
+        let tx = set_up_connection();
+        tx.send(b"GET / HTTP/1.1\r\nContent-Length:    10\r\n\r\n012345789".to_vec())
+            .unwrap();
+
+        thread::sleep(Duration::new(3, 0));
     }
 }
