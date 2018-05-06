@@ -1,3 +1,4 @@
+use std::io;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -36,7 +37,7 @@ impl TCPRead {
         }
 
         let c = self.buf[self.buf_ptr];
-        println!("Did TCP read, read {:?} at {:?}", c as char, self.buf_ptr);
+        //println!("Did TCP read, read {:?} at {:?}", c as char, self.buf_ptr);
         self.buf_ptr += 1;
         Some(c)
     }
@@ -74,7 +75,7 @@ struct HTTPRead {
     end_ptr: usize,
 }
 
-impl HTTPRead {
+impl<'a> HTTPRead {
     fn new(tcp_stream: TcpStream, max_len: usize) -> HTTPRead {
         HTTPRead {
             tcp_read: TCPRead {
@@ -97,6 +98,16 @@ impl HTTPRead {
 
             end_ptr: 0,
         }
+    }
+
+    fn write(&mut self, data: &[u8]) -> Result<(), io::Error> {
+        self.tcp_read.tcp_stream.write(data)?;
+        self.tcp_read.tcp_stream.flush()?;
+        Ok(())
+    }
+
+    fn close(&mut self) {
+        self.tcp_read.tcp_stream.shutdown(Shutdown::Both).unwrap();
     }
 
     fn read_until_body(&mut self, c: &u8) -> bool {
@@ -171,12 +182,8 @@ impl HTTPRead {
             }
         };
     }
-}
 
-impl Iterator for HTTPRead {
-    type Item = Vec<u8>;
-
-    fn next(&mut self) -> Option<Vec<u8>> {
+    fn next(&mut self) -> Option<String> {
         let mut result: Vec<u8> = Vec::new();
 
         self.content_length_ptr = 0;
@@ -195,6 +202,8 @@ impl Iterator for HTTPRead {
 
             i += 1;
 
+            println!("{:?}", str::from_utf8(&result).unwrap());
+
             match self.read_state {
                 HTTPReadState::READING_CONTENT_LENGTH => {
                     self.read_content_header(&c);
@@ -211,7 +220,7 @@ impl Iterator for HTTPRead {
                     }
                 }
                 HTTPReadState::READING_BODY => {
-                    println!("end_ptr is {:?}, i is {:?}", i, self.end_ptr);
+                    //println!("end_ptr is {:?}, i is {:?}", i, self.end_ptr);
                     if i >= self.end_ptr - 1 {
                         println!("Done!");
                         break;
@@ -220,8 +229,24 @@ impl Iterator for HTTPRead {
             };
         }
 
-        return Some(result);
+        return str::from_utf8(&result)
+            .and_then(|s: &str| Ok(s.to_string()))
+            .ok();
     }
+}
+
+enum VerifyStatus {
+    UNVERIFIED,
+    INVALID,
+    VALID,
+}
+
+fn requires_cuckoo(_: &String) -> bool {
+    true
+}
+
+fn verified(_: &String) -> VerifyStatus {
+    VerifyStatus::UNVERIFIED
 }
 
 fn handle_client(mut client_stream: TcpStream) {
@@ -235,11 +260,40 @@ fn handle_client(mut client_stream: TcpStream) {
     let mut h = HTTPRead::new(client_stream, BUF_SIZE);
 
     loop {
-        h.next();
+        let msg_raw = h.next();
+        if msg_raw.is_none() {
+            return;
+        }
+        let msg = msg_raw.unwrap();
+
+        println!("{:?}", msg);
+
+        match verified(&msg) {
+            VerifyStatus::UNVERIFIED => {
+                if requires_cuckoo(&msg) {
+                    // Reply with request details
+                    let body = format!("<p>{}</p>", msg);
+                    let http_message = format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: text-html\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                    if h.write(http_message.as_bytes()).is_err() {
+                        h.close();
+                    }
+
+                // Then drop the connection
+                } else {
+                    // Forward it to the server
+                }
+            }
+            VerifyStatus::INVALID => {
+                // Drop the connection
+            }
+            VerifyStatus::VALID => {
+                // Forward sub-message to the server
+            }
+        }
     }
 }
 
-fn server_thread(local_ip: String) {
+pub fn server_start(local_ip: String) {
     let listener = TcpListener::bind(local_ip.clone()).unwrap();
     for stream in listener.incoming() {
         if stream.is_err() {
@@ -251,7 +305,7 @@ fn server_thread(local_ip: String) {
 
 #[cfg(test)]
 mod tests {
-    use http_server::server_thread;
+    use http_server::server_start;
     use std::io::Write;
     use std::net::TcpStream;
     use std::sync::mpsc;
@@ -260,7 +314,7 @@ mod tests {
     use std::vec::Vec;
 
     fn set_up_connection() -> mpsc::Sender<Vec<u8>> {
-        thread::spawn(|| server_thread("127.0.0.1:8080".to_string()));
+        thread::spawn(|| server_start("127.0.0.1:8080".to_string()));
         let (tx, rx): (mpsc::Sender<Vec<u8>>, mpsc::Receiver<Vec<u8>>) = mpsc::channel();
         thread::spawn(move || {
             let mut s = TcpStream::connect("127.0.0.1:8080").unwrap();
@@ -275,7 +329,7 @@ mod tests {
     #[test]
     fn standard_read_works() {
         let tx = set_up_connection();
-        tx.send(b"GET / HTTP/1.1\r\nContent-Length:    10\r\n\r\n012345789".to_vec())
+        tx.send(b"GET / HTTP/1.1\r\nContent-Length: 10\r\n\r\n012345789".to_vec())
             .unwrap();
 
         thread::sleep(Duration::new(3, 0));
