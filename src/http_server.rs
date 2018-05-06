@@ -292,10 +292,11 @@ fn handle_client(mut client_stream: TcpStream) {
                     let http_message = format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: text-html\r\nConnection: close\r\n\r\n{}", body.len(), body);
                     if h.write(http_message.as_bytes()).is_err() {
                         h.close();
+                    } else {
+                        // Then drop the connection
+                        h.close();
                     }
 
-                    // Then drop the connection
-                    h.close();
                     return;
                 } else {
                     // Forward it to the server
