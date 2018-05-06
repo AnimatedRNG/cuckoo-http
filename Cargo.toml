@@ -10,3 +10,9 @@ path = "src/lib.rs"
 [dependencies]
 blake2 = "0.7"
 digest = { version = "0.7", features = ["std"]}
+stdweb = "0.4.4"
+
+[profile.release]
+lto = true
+opt-level = 's'
+debug = false

@@ -19,7 +19,7 @@ pub struct CuckooSolve {
 }
 
 // Refactor sometime
-fn path(v: &CuckooSolve, mut u: i32, us: &mut [i32; MAXPATHLEN]) -> Option<usize> {
+pub fn path(v: &CuckooSolve, mut u: i32, us: &mut [i32; MAXPATHLEN]) -> Option<usize> {
     let mut nu: usize = 0;
     while u != 0 {
         nu += 1;
@@ -41,7 +41,7 @@ fn path(v: &CuckooSolve, mut u: i32, us: &mut [i32; MAXPATHLEN]) -> Option<usize
     return Some(nu);
 }
 
-fn solution(
+pub fn solution(
     v: &CuckooSolve,
     us: [i32; MAXPATHLEN],
     mut nu: i32,
