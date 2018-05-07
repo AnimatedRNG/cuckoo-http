@@ -354,7 +354,11 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
                 if requires_cuckoo(&url) {
                     // Reply with request details
                     let mut body = str::from_utf8(cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap()).unwrap().to_string();
-                    let mut adjusted = body.replacen("HEADER", "test", 1).replacen("EASINESS", "70", 1).replacen("DIFFICULTY", "99.9", 1);
+                    let mut adjusted = body
+                        .replacen("HEADER", "test", 1)
+                        .replacen("EASINESS", "70", 1)
+                        .replacen("DIFFICULTY", "99.9", 1)
+                        .replacen("MSG", &msg, 1);
                     let m = format_response_text(&adjusted, "text/html");
                     if h.write(m.as_bytes()).is_err() {
                         h.close();

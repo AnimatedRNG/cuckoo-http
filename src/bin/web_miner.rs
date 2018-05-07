@@ -15,6 +15,7 @@ fn main() {
     let header = nl.item(3).unwrap().text_content().unwrap();
     let easipct = nl.item(5).unwrap().text_content().unwrap().parse::<i64>().unwrap();
     let difficulty = nl.item(7).unwrap().text_content().unwrap().parse::<f64>().unwrap();
+    let _msg = nl.item(9).unwrap().text_content().unwrap();
 
     let graph_v = cuckoo::hash_header(header.as_bytes());
 
