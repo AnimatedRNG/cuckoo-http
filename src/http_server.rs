@@ -353,8 +353,10 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
             VerifyStatus::UNVERIFIED => {
                 if requires_cuckoo(&url) {
                     // Reply with request details
-                    let m = cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap();
-                    if h.write(m).is_err() {
+                    let mut body = str::from_utf8(cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap()).unwrap().to_string();
+                    let mut adjusted = body.replacen("HEADER", "test", 1).replacen("EASINESS", "70", 1).replacen("DIFFICULTY", "99.9", 1);
+                    let m = format_response_text(&adjusted, "text/html");
+                    if h.write(m.as_bytes()).is_err() {
                         h.close();
                     } else {
                         // Then drop the connection
@@ -384,10 +386,12 @@ pub fn server_start(local_ip: String) {
         }
 
         let mut st = HashMap::new();
-        st.insert(StaticResource::WEB_MINER_HTML,
+        /*st.insert(StaticResource::WEB_MINER_HTML,
                   format_response_text(&mut fs::read_to_string(
                       "static/index.html").unwrap(),
-                                       "text/html").as_bytes().to_vec());
+        "text/html").as_bytes().to_vec());*/
+        st.insert(StaticResource::WEB_MINER_HTML,
+                  fs::read("static/index.html").unwrap());
         st.insert(StaticResource::WEB_MINER_JS,
                   format_response_text(&mut fs::read_to_string(
                       "target/wasm32-unknown-unknown/release/web_miner.js").unwrap(),
