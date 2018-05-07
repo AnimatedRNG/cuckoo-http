@@ -328,10 +328,9 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
 
         if url == "/web_miner.wasm" {
             // TODO: Take this conversion out of HTTP request handling...
-            let body = cached_files.get(&StaticResource::WEB_MINER_WASM).unwrap().clone();
-            let http_message = format_response_binary(body, "application/wasm");
+            let m = cached_files.get(&StaticResource::WEB_MINER_WASM).unwrap();
 
-            if h.write(&http_message).is_err() {
+            if h.write(m).is_err() {
                 h.close();
             } else {
                 h.close();
@@ -339,10 +338,9 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
 
             return;
         } else if url == "/web_miner.js" {
-            let body = str::from_utf8((&cached_files.get(&StaticResource::WEB_MINER_JS)).unwrap()).unwrap().to_string();
-            let http_message = format_response_text(&body, "application/javascript");
+            let m = cached_files.get(&StaticResource::WEB_MINER_JS).unwrap();
 
-            if h.write(http_message.as_bytes()).is_err() {
+            if h.write(m).is_err() {
                 h.close();
             } else {
                 h.close();
@@ -355,9 +353,8 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
             VerifyStatus::UNVERIFIED => {
                 if requires_cuckoo(&url) {
                     // Reply with request details
-                    let body = str::from_utf8((&cached_files.get(&StaticResource::WEB_MINER_HTML)).unwrap()).unwrap().to_string();
-                    let http_message = format_response_text(&body, "text/html");
-                    if h.write(http_message.as_bytes()).is_err() {
+                    let m = cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap();
+                    if h.write(m).is_err() {
                         h.close();
                     } else {
                         // Then drop the connection
@@ -387,9 +384,19 @@ pub fn server_start(local_ip: String) {
         }
 
         let mut st = HashMap::new();
-        st.insert(StaticResource::WEB_MINER_HTML, fs::read("static/index.html").unwrap());
-        st.insert(StaticResource::WEB_MINER_JS, fs::read("target/wasm32-unknown-unknown/release/web_miner.js").unwrap());
-        st.insert(StaticResource::WEB_MINER_WASM, fs::read("target/wasm32-unknown-unknown/release/web_miner.wasm").unwrap());
+        st.insert(StaticResource::WEB_MINER_HTML,
+                  format_response_text(&mut fs::read_to_string(
+                      "static/index.html").unwrap(),
+                                       "text/html").as_bytes().to_vec());
+        st.insert(StaticResource::WEB_MINER_JS,
+                  format_response_text(&mut fs::read_to_string(
+                      "target/wasm32-unknown-unknown/release/web_miner.js").unwrap(),
+                                       "application/javascript").as_bytes().to_vec());
+        st.insert(StaticResource::WEB_MINER_WASM,
+                  format_response_binary(fs::read(
+                      "target/wasm32-unknown-unknown/release/web_miner.wasm").unwrap(),
+                                         "application/wasm"
+                  ));
         thread::spawn(|| handle_client(stream.unwrap(), st));
     }
 }
