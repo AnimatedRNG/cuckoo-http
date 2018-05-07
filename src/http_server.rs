@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::str;
+use std::fs;
+use std::collections::HashMap;
 use std::thread;
 use std::time::Duration;
 use std::vec::Vec;
@@ -55,6 +57,7 @@ enum ContentLengthState {
 
 enum HTTPReadState {
     READING_METHOD,
+    READING_URL,
     READING_CONTENT_LENGTH,
     READING_UNTIL_BODY,
     READING_BODY,
@@ -63,6 +66,8 @@ enum HTTPReadState {
 struct HTTPRead {
     tcp_read: TCPRead,
     max_len: usize,
+
+    tmp_url_buffer: Vec<u8>,
 
     content_length_ptr: usize,
     content_length: Option<usize>,
@@ -87,6 +92,8 @@ impl<'a> HTTPRead {
                 offset: 0,
             },
             max_len: max_len,
+
+            tmp_url_buffer: Vec::new(),
 
             content_length_ptr: 0,
             content_length: None,
@@ -136,7 +143,7 @@ impl<'a> HTTPRead {
                 } else {
                     ContentLengthState::READING_NAME
                 }
-            }
+            },
             ContentLengthState::READING_WHITESPACE => {
                 if *c != b' ' && *c != b'\t' {
                     ContentLengthState::READING_NUMBER
@@ -184,7 +191,7 @@ impl<'a> HTTPRead {
         };
     }
 
-    fn next(&mut self) -> Option<String> {
+    fn next(&mut self) -> Option<(String, String)> {
         let mut result: Vec<u8> = Vec::new();
 
         self.content_length_ptr = 0;
@@ -203,15 +210,20 @@ impl<'a> HTTPRead {
 
             i += 1;
 
-            println!("{:?}", str::from_utf8(&result).unwrap());
-
             match self.read_state {
                 HTTPReadState::READING_METHOD => {
                     if c == b' ' || c == b'\t' {
                         if result == b"GET " {
                             self.content_length = Some(0);
-                            self.read_state = HTTPReadState::READING_UNTIL_BODY;
                         }
+                        self.read_state = HTTPReadState::READING_URL;
+                    }
+                }
+                HTTPReadState::READING_URL => {
+                    if c == b' ' || c == b'\t' {
+                        self.read_state = HTTPReadState::READING_CONTENT_LENGTH;
+                    } else {
+                        self.tmp_url_buffer.push(c);
                     }
                 }
                 HTTPReadState::READING_CONTENT_LENGTH => {
@@ -222,7 +234,6 @@ impl<'a> HTTPRead {
                 }
                 HTTPReadState::READING_UNTIL_BODY => {
                     let cl = self.content_length.unwrap();
-                    println!("Content length: {:?}", cl);
                     if self.read_until_body(&c) {
                         if cl == 0 {
                             println!("Done!");
@@ -245,9 +256,21 @@ impl<'a> HTTPRead {
             };
         }
 
-        return str::from_utf8(&result)
-            .and_then(|s: &str| Ok(s.to_string()))
-            .ok();
+        let str_result = match str::from_utf8(&result) {
+            Err(_) => None,
+            Ok(s) => Some(s.to_string()),
+        };
+
+        let url_result = match str::from_utf8(&self.tmp_url_buffer) {
+            Err(_) => None,
+            Ok(s) => Some(s.to_string()),
+        };
+
+        if str_result.is_some() && url_result.is_some() {
+            Some((str_result.unwrap(), url_result.unwrap()))
+        } else {
+            None
+        }
     }
 }
 
@@ -265,7 +288,25 @@ fn verified(_: &String) -> VerifyStatus {
     VerifyStatus::UNVERIFIED
 }
 
-fn handle_client(mut client_stream: TcpStream) {
+fn format_response_text(body: &String, content_type: &'static str) -> String {
+    return format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n{}", body.len(), content_type, body);
+}
+
+fn format_response_binary(mut body: Vec<u8>, content_type: &'static str) -> Vec<u8> {
+    let mut header = format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n", body.len(), content_type).as_bytes().to_vec();
+    header.append(&mut body);
+    return header;
+}
+
+#[derive(Hash, PartialEq, Eq)]
+enum StaticResource {
+    WEB_MINER_JS,
+    WEB_MINER_WASM,
+    WEB_MINER_HTML,
+}
+
+fn handle_client(mut client_stream: TcpStream,
+cached_files: HashMap<StaticResource, Vec<u8>>) {
     client_stream
         .set_read_timeout(Some(Duration::new(20, 0)))
         .unwrap();
@@ -280,16 +321,42 @@ fn handle_client(mut client_stream: TcpStream) {
         if msg_raw.is_none() {
             return;
         }
-        let msg = msg_raw.unwrap();
+        let (msg, url) = msg_raw.unwrap();
 
-        println!("{:?}", msg);
+        println!("{}", msg);
+        println!("URL: {}", url);
+
+        if url == "/web_miner.wasm" {
+            // TODO: Take this conversion out of HTTP request handling...
+            let body = cached_files.get(&StaticResource::WEB_MINER_WASM).unwrap().clone();
+            let http_message = format_response_binary(body, "application/wasm");
+
+            if h.write(&http_message).is_err() {
+                h.close();
+            } else {
+                h.close();
+            }
+
+            return;
+        } else if url == "/web_miner.js" {
+            let body = str::from_utf8((&cached_files.get(&StaticResource::WEB_MINER_JS)).unwrap()).unwrap().to_string();
+            let http_message = format_response_text(&body, "application/javascript");
+
+            if h.write(http_message.as_bytes()).is_err() {
+                h.close();
+            } else {
+                h.close();
+            }
+
+            return;
+        }
 
         match verified(&msg) {
             VerifyStatus::UNVERIFIED => {
-                if requires_cuckoo(&msg) {
+                if requires_cuckoo(&url) {
                     // Reply with request details
-                    let body = format!("<p>{}</p>", msg);
-                    let http_message = format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: text-html\r\nConnection: close\r\n\r\n{}", body.len(), body);
+                    let body = str::from_utf8((&cached_files.get(&StaticResource::WEB_MINER_HTML)).unwrap()).unwrap().to_string();
+                    let http_message = format_response_text(&body, "text/html");
                     if h.write(http_message.as_bytes()).is_err() {
                         h.close();
                     } else {
@@ -318,7 +385,12 @@ pub fn server_start(local_ip: String) {
         if stream.is_err() {
             continue;
         }
-        thread::spawn(|| handle_client(stream.unwrap()));
+
+        let mut st = HashMap::new();
+        st.insert(StaticResource::WEB_MINER_HTML, fs::read("static/index.html").unwrap());
+        st.insert(StaticResource::WEB_MINER_JS, fs::read("target/wasm32-unknown-unknown/release/web_miner.js").unwrap());
+        st.insert(StaticResource::WEB_MINER_WASM, fs::read("target/wasm32-unknown-unknown/release/web_miner.wasm").unwrap());
+        thread::spawn(|| handle_client(stream.unwrap(), st));
     }
 }
 
@@ -348,7 +420,7 @@ mod tests {
     #[test]
     fn get_works() {
         let tx = set_up_connection();
-        tx.send(b"GET / HTTP/1.1\r\nContent-Length: 10\r\n\r\n".to_vec())
+        tx.send(b"GET /test HTTP/1.1\r\nContent-Length: 10\r\n\r\n".to_vec())
             .unwrap();
 
         thread::sleep(Duration::new(3, 0));
