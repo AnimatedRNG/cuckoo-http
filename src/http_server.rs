@@ -1,10 +1,12 @@
+use rand::{thread_rng, Generator, Rng, ThreadRng};
+use std::collections::HashMap;
+use std::fs;
 use std::io;
 use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::str;
-use std::fs;
-use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use std::vec::Vec;
@@ -13,6 +15,7 @@ const BUF_SIZE: usize = 8192;
 const CONTENT_LENGTH: &[u8] = b"Content-Length:";
 const HEADER_END: &[u8] = b"\n\r\n";
 const HEADER_LENGTH: usize = 32;
+const RNG_BUF_SIZE: usize = 8;
 
 struct TCPRead {
     tcp_stream: TcpStream,
@@ -82,7 +85,7 @@ struct HTTPRead {
     end_ptr: usize,
 }
 
-impl<'a> HTTPRead {
+impl HTTPRead {
     fn new(tcp_stream: TcpStream, max_len: usize) -> HTTPRead {
         HTTPRead {
             tcp_read: TCPRead {
@@ -144,7 +147,7 @@ impl<'a> HTTPRead {
                 } else {
                     ContentLengthState::READING_NAME
                 }
-            },
+            }
             ContentLengthState::READING_WHITESPACE => {
                 if *c != b' ' && *c != b'\t' {
                     ContentLengthState::READING_NUMBER
@@ -299,7 +302,7 @@ fn format_response_binary(mut body: Vec<u8>, content_type: &'static str) -> Vec<
     return header;
 }
 
-fn efficient_replace(orig_text: &[u8], text_to_find: &[u8], replace_with: &[u8]) -> Vec<u8>{
+fn efficient_replace(orig_text: &[u8], text_to_find: &[u8], replace_with: &[u8]) -> Vec<u8> {
     let len = orig_text.len();
     let mut a = 0;
 
@@ -347,10 +350,43 @@ struct CuckooProblem {
     difficulty: f64,
 }
 
-type CuckooMap = HashMap<[u8; HEADER_LENGTH], CuckooProblem>;
+type RequestMap = HashMap<[u8; HEADER_LENGTH], CuckooProblem>;
 
-fn handle_client(mut client_stream: TcpStream,
-cached_files: HashMap<StaticResource, Vec<u8>>) {
+struct HeaderGenerator<'a> {
+    u8_gen: Generator<'a, u8, ThreadRng>,
+    tmp: Vec<[u8; HEADER_LENGTH]>,
+}
+
+impl<'a> HeaderGenerator<'a> {
+    fn regenerate(&mut self) {
+        if self.tmp.len() == 0 {
+            for _ in 0..RNG_BUF_SIZE {
+                let u = &mut self.u8_gen;
+                let a = u.take(HEADER_LENGTH).collect::<Vec<u8>>();
+                let mut c: [u8; HEADER_LENGTH] = [0; HEADER_LENGTH];
+                &c.clone_from_slice(&a);
+                self.tmp.push(c);
+            }
+        }
+    }
+}
+
+impl<'a> Iterator for HeaderGenerator<'a> {
+    type Item = [u8; HEADER_LENGTH];
+
+    fn next(&mut self) -> Option<[u8; HEADER_LENGTH]> {
+        if self.tmp.len() == 0 {
+            self.regenerate();
+        }
+        Some(self.tmp.pop().unwrap())
+    }
+}
+
+fn handle_client(
+    mut client_stream: TcpStream,
+    cached_files: HashMap<StaticResource, Vec<u8>>,
+    unsolved_requests: Arc<Mutex<RequestMap>>,
+) {
     client_stream
         .set_read_timeout(Some(Duration::new(20, 0)))
         .unwrap();
@@ -358,9 +394,17 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
         .set_write_timeout(Some(Duration::new(5, 0)))
         .unwrap();
 
+    let mut rng = thread_rng();
+    let u8_gen = rng.gen_iter::<u8>();
+    let mut h_gen = HeaderGenerator {
+        u8_gen: u8_gen,
+        tmp: Vec::new(),
+    };
+
     let mut h = HTTPRead::new(client_stream, BUF_SIZE);
 
     loop {
+        h_gen.regenerate();
         let msg_raw = h.next();
         if msg_raw.is_none() {
             return;
@@ -398,9 +442,11 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
                 if requires_cuckoo(&url) {
                     // Reply with request details
                     let index = cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap();
-                    let header_replaced = efficient_replace(index, b"HEADER", b"test");
+                    let new_header = h_gen.next().unwrap();
+                    let header_replaced = efficient_replace(index, b"HEADER", &new_header);
                     let easiness_replaced = efficient_replace(&header_replaced, b"EASINESS", b"70");
-                    let difficulty_replaced = efficient_replace(&easiness_replaced, b"DIFFICULTY", b"99.9");
+                    let difficulty_replaced =
+                        efficient_replace(&easiness_replaced, b"DIFFICULTY", b"99.9");
                     let m = format_response_binary(difficulty_replaced, "text/html");
                     if h.write(&m).is_err() {
                         h.close();
@@ -432,28 +478,36 @@ pub fn server_start(local_ip: String) {
         }
 
         let mut st = HashMap::new();
-        /*st.insert(StaticResource::WEB_MINER_HTML,
-                  format_response_text(&mut fs::read_to_string(
-                      "static/index.html").unwrap(),
-        "text/html").as_bytes().to_vec());*/
-        st.insert(StaticResource::WEB_MINER_HTML,
-                  fs::read("static/index.html").unwrap());
-        st.insert(StaticResource::WEB_MINER_JS,
-                  format_response_text(&mut fs::read_to_string(
-                      "target/wasm32-unknown-unknown/release/web_miner.js").unwrap(),
-                                       "application/javascript").as_bytes().to_vec());
-        st.insert(StaticResource::WEB_MINER_WASM,
-                  format_response_binary(fs::read(
-                      "target/wasm32-unknown-unknown/release/web_miner.wasm").unwrap(),
-                                         "application/wasm"
-                  ));
-        thread::spawn(|| handle_client(stream.unwrap(), st));
+        st.insert(
+            StaticResource::WEB_MINER_HTML,
+            fs::read("static/index.html").unwrap(),
+        );
+        st.insert(
+            StaticResource::WEB_MINER_JS,
+            format_response_text(
+                &mut fs::read_to_string("target/wasm32-unknown-unknown/release/web_miner.js")
+                    .unwrap(),
+                "application/javascript",
+            ).as_bytes()
+                .to_vec(),
+        );
+        st.insert(
+            StaticResource::WEB_MINER_WASM,
+            format_response_binary(
+                fs::read("target/wasm32-unknown-unknown/release/web_miner.wasm").unwrap(),
+                "application/wasm",
+            ),
+        );
+
+        let unsolved_requests = Arc::new(Mutex::new(HashMap::new()));
+
+        thread::spawn(|| handle_client(stream.unwrap(), st, unsolved_requests));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use http_server::{server_start, efficient_replace};
+    use http_server::{efficient_replace, server_start};
     use std::io::Write;
     use std::net::TcpStream;
     use std::sync::mpsc;
@@ -487,7 +541,10 @@ mod tests {
 
         let v5: [u8; 3] = [0, 1, 2];
         let v6: [u8; 5] = [0, 1, 2, 3, 4];
-        assert_eq!(efficient_replace(&a, &v5, &v6), vec![0, 1, 2, 3, 4, 5, 5, 5, 1, 2]);
+        assert_eq!(
+            efficient_replace(&a, &v5, &v6),
+            vec![0, 1, 2, 3, 4, 5, 5, 5, 1, 2]
+        );
     }
 
     #[test]
