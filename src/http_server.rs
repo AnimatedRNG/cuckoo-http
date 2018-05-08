@@ -16,6 +16,8 @@ const CONTENT_LENGTH: &[u8] = b"Content-Length:";
 const HEADER_END: &[u8] = b"\n\r\n";
 const HEADER_LENGTH: usize = 32;
 const RNG_BUF_SIZE: usize = 8;
+const EASIPCT: i32 = 70;
+const DIFFICULTY: f64 = 99.9;
 
 struct TCPRead {
     tcp_stream: TcpStream,
@@ -443,11 +445,32 @@ fn handle_client(
                     // Reply with request details
                     let index = cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap();
                     let new_header = h_gen.next().unwrap();
+
+                    let problem = CuckooProblem {
+                        easipct: EASIPCT,
+                        difficulty: DIFFICULTY,
+                    };
+
+                    let easipct_str = format!("{}", EASIPCT);
+                    let difficulty_str = format!("{}", DIFFICULTY);
+
                     let header_replaced = efficient_replace(index, b"HEADER", &new_header);
-                    let easiness_replaced = efficient_replace(&header_replaced, b"EASINESS", b"70");
-                    let difficulty_replaced =
-                        efficient_replace(&easiness_replaced, b"DIFFICULTY", b"99.9");
+                    let easiness_replaced =
+                        efficient_replace(&header_replaced, b"EASINESS", easipct_str.as_bytes());
+                    let difficulty_replaced = efficient_replace(
+                        &easiness_replaced,
+                        b"DIFFICULTY",
+                        difficulty_str.as_bytes(),
+                    );
                     let m = format_response_binary(difficulty_replaced, "text/html");
+
+                    {
+                        unsolved_requests
+                            .lock()
+                            .unwrap()
+                            .insert(new_header, problem);
+                    }
+
                     if h.write(&m).is_err() {
                         h.close();
                     } else {
