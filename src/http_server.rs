@@ -2,7 +2,6 @@ use rand::{thread_rng, Generator, Rng, ThreadRng};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::io::{BufRead, BufReader, BufWriter};
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::str;
@@ -56,17 +55,17 @@ impl TCPRead {
 }
 
 enum ContentLengthState {
-    READING_NAME,
-    READING_WHITESPACE,
-    READING_NUMBER,
+    ReadingName,
+    ReadingWhitespace,
+    ReadingNumber,
 }
 
 enum HTTPReadState {
-    READING_METHOD,
-    READING_URL,
-    READING_CONTENT_LENGTH,
-    READING_UNTIL_BODY,
-    READING_BODY,
+    ReadingMethod,
+    ReadingUrl,
+    ReadingContentLength,
+    ReadingUntilBody,
+    ReadingBody,
 }
 
 struct HTTPRead {
@@ -104,9 +103,9 @@ impl HTTPRead {
             content_length_ptr: 0,
             content_length: None,
             tmp_content_length_buffer: Vec::new(),
-            content_length_state: ContentLengthState::READING_NAME,
+            content_length_state: ContentLengthState::ReadingName,
 
-            read_state: HTTPReadState::READING_CONTENT_LENGTH,
+            read_state: HTTPReadState::ReadingContentLength,
 
             rest_of_http_header: 0,
 
@@ -142,22 +141,22 @@ impl HTTPRead {
 
     fn read_content_header(&mut self, c: &u8) {
         self.content_length_state = match self.content_length_state {
-            ContentLengthState::READING_NAME => {
+            ContentLengthState::ReadingName => {
                 if self.content_length_ptr >= CONTENT_LENGTH.len() {
                     self.content_length_ptr = 0;
-                    ContentLengthState::READING_WHITESPACE
+                    ContentLengthState::ReadingWhitespace
                 } else {
-                    ContentLengthState::READING_NAME
+                    ContentLengthState::ReadingName
                 }
             }
-            ContentLengthState::READING_WHITESPACE => {
+            ContentLengthState::ReadingWhitespace => {
                 if *c != b' ' && *c != b'\t' {
-                    ContentLengthState::READING_NUMBER
+                    ContentLengthState::ReadingNumber
                 } else {
-                    ContentLengthState::READING_WHITESPACE
+                    ContentLengthState::ReadingWhitespace
                 }
             }
-            ContentLengthState::READING_NUMBER => {
+            ContentLengthState::ReadingNumber => {
                 if *c == b'\r' {
                     let mut accum: usize = 0;
                     for ci in &self.tmp_content_length_buffer {
@@ -170,12 +169,12 @@ impl HTTPRead {
                     self.content_length = Some(accum);
                     self.content_length_ptr = 0;
                 }
-                ContentLengthState::READING_NUMBER
+                ContentLengthState::ReadingNumber
             }
         };
 
         match self.content_length_state {
-            ContentLengthState::READING_NAME => {
+            ContentLengthState::ReadingName => {
                 if self.content_length_ptr < CONTENT_LENGTH.len() {
                     if *c == CONTENT_LENGTH[self.content_length_ptr] {
                         self.content_length_ptr += 1;
@@ -184,12 +183,12 @@ impl HTTPRead {
                     }
                 }
             }
-            ContentLengthState::READING_WHITESPACE => {
+            ContentLengthState::ReadingWhitespace => {
                 //if *c == b' ' || *c == b'\t' {
                 //self.content_length_ptr += 1;
                 //}
             }
-            ContentLengthState::READING_NUMBER => {
+            ContentLengthState::ReadingNumber => {
                 if *c != b'\r' {
                     self.tmp_content_length_buffer.push(*c);
                 }
@@ -203,7 +202,7 @@ impl HTTPRead {
         self.content_length_ptr = 0;
         self.rest_of_http_header = 0;
         self.end_ptr = 0;
-        self.read_state = HTTPReadState::READING_METHOD;
+        self.read_state = HTTPReadState::ReadingMethod;
 
         let mut i = self.tcp_read.ptr();
         loop {
@@ -217,45 +216,45 @@ impl HTTPRead {
             i += 1;
 
             match self.read_state {
-                HTTPReadState::READING_METHOD => {
+                HTTPReadState::ReadingMethod => {
                     if c == b' ' || c == b'\t' {
                         if result == b"GET " {
                             self.content_length = Some(0);
                         }
-                        self.read_state = HTTPReadState::READING_URL;
+                        self.read_state = HTTPReadState::ReadingUrl;
                     }
                 }
-                HTTPReadState::READING_URL => {
+                HTTPReadState::ReadingUrl => {
                     if c == b' ' || c == b'\t' {
-                        self.read_state = HTTPReadState::READING_CONTENT_LENGTH;
+                        self.read_state = HTTPReadState::ReadingContentLength;
                     } else {
                         self.tmp_url_buffer.push(c);
                     }
                 }
-                HTTPReadState::READING_CONTENT_LENGTH => {
+                HTTPReadState::ReadingContentLength => {
                     self.read_content_header(&c);
                     if self.content_length.is_some() {
-                        self.read_state = HTTPReadState::READING_UNTIL_BODY;
+                        self.read_state = HTTPReadState::ReadingUntilBody;
                     }
                 }
-                HTTPReadState::READING_UNTIL_BODY => {
+                HTTPReadState::ReadingUntilBody => {
                     let cl = self.content_length.unwrap();
                     if self.read_until_body(&c) {
                         if cl == 0 {
                             println!("Done!");
-                            self.read_state = HTTPReadState::READING_METHOD;
+                            self.read_state = HTTPReadState::ReadingMethod;
                             break;
                         }
 
                         self.end_ptr = i + cl;
-                        self.read_state = HTTPReadState::READING_BODY;
+                        self.read_state = HTTPReadState::ReadingBody;
                     }
                 }
-                HTTPReadState::READING_BODY => {
+                HTTPReadState::ReadingBody => {
                     //println!("end_ptr is {:?}, i is {:?}", i, self.end_ptr);
                     if i >= self.end_ptr - 1 {
                         println!("Done!");
-                        self.read_state = HTTPReadState::READING_METHOD;
+                        self.read_state = HTTPReadState::ReadingMethod;
                         break;
                     }
                 }
@@ -281,9 +280,9 @@ impl HTTPRead {
 }
 
 enum VerifyStatus {
-    UNVERIFIED,
-    INVALID,
-    VALID,
+    Unverified,
+    Invalid,
+    Valid,
 }
 
 fn requires_cuckoo(_: &String) -> bool {
@@ -291,7 +290,7 @@ fn requires_cuckoo(_: &String) -> bool {
 }
 
 fn verified(_: &String) -> VerifyStatus {
-    VerifyStatus::UNVERIFIED
+    VerifyStatus::Unverified
 }
 
 fn format_response_text(body: &String, content_type: &'static str) -> String {
@@ -342,9 +341,9 @@ fn efficient_replace(orig_text: &[u8], text_to_find: &[u8], replace_with: &[u8])
 
 #[derive(Hash, PartialEq, Eq)]
 enum StaticResource {
-    WEB_MINER_JS,
-    WEB_MINER_WASM,
-    WEB_MINER_HTML,
+    WebMinerJS,
+    WebMinerWasm,
+    WebMinerHtml,
 }
 
 struct CuckooProblem {
@@ -418,7 +417,7 @@ fn handle_client(
 
         if url == "/web_miner.wasm" {
             // TODO: Take this conversion out of HTTP request handling...
-            let m = cached_files.get(&StaticResource::WEB_MINER_WASM).unwrap();
+            let m = cached_files.get(&StaticResource::WebMinerWasm).unwrap();
 
             if h.write(m).is_err() {
                 h.close();
@@ -428,7 +427,7 @@ fn handle_client(
 
             return;
         } else if url == "/web_miner.js" {
-            let m = cached_files.get(&StaticResource::WEB_MINER_JS).unwrap();
+            let m = cached_files.get(&StaticResource::WebMinerJS).unwrap();
 
             if h.write(m).is_err() {
                 h.close();
@@ -440,10 +439,10 @@ fn handle_client(
         }
 
         match verified(&msg) {
-            VerifyStatus::UNVERIFIED => {
+            VerifyStatus::Unverified => {
                 if requires_cuckoo(&url) {
                     // Reply with request details
-                    let index = cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap();
+                    let index = cached_files.get(&StaticResource::WebMinerHtml).unwrap();
                     let new_header = h_gen.next().unwrap();
 
                     let problem = CuckooProblem {
@@ -483,10 +482,10 @@ fn handle_client(
                     // Forward it to the server
                 }
             }
-            VerifyStatus::INVALID => {
+            VerifyStatus::Invalid => {
                 // Drop the connection
             }
-            VerifyStatus::VALID => {
+            VerifyStatus::Valid => {
                 // Forward sub-message to the server
             }
         }
@@ -502,11 +501,11 @@ pub fn server_start(local_ip: String) {
 
         let mut st = HashMap::new();
         st.insert(
-            StaticResource::WEB_MINER_HTML,
+            StaticResource::WebMinerHtml,
             fs::read("static/index.html").unwrap(),
         );
         st.insert(
-            StaticResource::WEB_MINER_JS,
+            StaticResource::WebMinerJS,
             format_response_text(
                 &mut fs::read_to_string("target/wasm32-unknown-unknown/release/web_miner.js")
                     .unwrap(),
@@ -515,7 +514,7 @@ pub fn server_start(local_ip: String) {
                 .to_vec(),
         );
         st.insert(
-            StaticResource::WEB_MINER_WASM,
+            StaticResource::WebMinerWasm,
             format_response_binary(
                 fs::read("target/wasm32-unknown-unknown/release/web_miner.wasm").unwrap(),
                 "application/wasm",
