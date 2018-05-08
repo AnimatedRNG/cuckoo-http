@@ -12,6 +12,7 @@ use std::vec::Vec;
 const BUF_SIZE: usize = 8192;
 const CONTENT_LENGTH: &[u8] = b"Content-Length:";
 const HEADER_END: &[u8] = b"\n\r\n";
+const HEADER_LENGTH: usize = 32;
 
 struct TCPRead {
     tcp_stream: TcpStream,
@@ -298,12 +299,55 @@ fn format_response_binary(mut body: Vec<u8>, content_type: &'static str) -> Vec<
     return header;
 }
 
+fn efficient_replace(orig_text: &[u8], text_to_find: &[u8], replace_with: &[u8]) -> Vec<u8>{
+    let len = orig_text.len();
+    let mut a = 0;
+
+    let mut new_text = Vec::new();
+
+    let mut appending: bool = false;
+
+    for i in 0..len {
+        let c = orig_text[i];
+        new_text.push(c);
+
+        if !appending {
+            if c == text_to_find[a] {
+                a += 1;
+            } else {
+                a = 0;
+            }
+
+            if a == text_to_find.len() {
+                let end_ptr = i + 1;
+                let start_ptr = end_ptr - a;
+
+                new_text.truncate(start_ptr);
+                for c1 in replace_with {
+                    new_text.push(*c1);
+                }
+
+                appending = true;
+            }
+        }
+    }
+
+    return new_text;
+}
+
 #[derive(Hash, PartialEq, Eq)]
 enum StaticResource {
     WEB_MINER_JS,
     WEB_MINER_WASM,
     WEB_MINER_HTML,
 }
+
+struct CuckooProblem {
+    easipct: i32,
+    difficulty: f64,
+}
+
+type CuckooMap = HashMap<[u8; HEADER_LENGTH], CuckooProblem>;
 
 fn handle_client(mut client_stream: TcpStream,
 cached_files: HashMap<StaticResource, Vec<u8>>) {
@@ -353,14 +397,12 @@ cached_files: HashMap<StaticResource, Vec<u8>>) {
             VerifyStatus::UNVERIFIED => {
                 if requires_cuckoo(&url) {
                     // Reply with request details
-                    let mut body = str::from_utf8(cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap()).unwrap().to_string();
-                    let mut adjusted = body
-                        .replacen("HEADER", "test", 1)
-                        .replacen("EASINESS", "70", 1)
-                        .replacen("DIFFICULTY", "99.9", 1)
-                        .replacen("MSG", &msg, 1);
-                    let m = format_response_text(&adjusted, "text/html");
-                    if h.write(m.as_bytes()).is_err() {
+                    let index = cached_files.get(&StaticResource::WEB_MINER_HTML).unwrap();
+                    let header_replaced = efficient_replace(index, b"HEADER", b"test");
+                    let easiness_replaced = efficient_replace(&header_replaced, b"EASINESS", b"70");
+                    let difficulty_replaced = efficient_replace(&easiness_replaced, b"DIFFICULTY", b"99.9");
+                    let m = format_response_binary(difficulty_replaced, "text/html");
+                    if h.write(&m).is_err() {
                         h.close();
                     } else {
                         // Then drop the connection
@@ -411,7 +453,7 @@ pub fn server_start(local_ip: String) {
 
 #[cfg(test)]
 mod tests {
-    use http_server::server_start;
+    use http_server::{server_start, efficient_replace};
     use std::io::Write;
     use std::net::TcpStream;
     use std::sync::mpsc;
@@ -430,6 +472,22 @@ mod tests {
             }
         });
         tx
+    }
+
+    #[test]
+    fn efficient_replace_works() {
+        let a: [u8; 8] = [0, 1, 2, 5, 5, 5, 1, 2];
+        let v1: [u8; 3] = [5, 5, 5];
+        let v2: [u8; 1] = [0];
+        assert_eq!(efficient_replace(&a, &v1, &v2), vec![0, 1, 2, 0, 1, 2]);
+
+        let v3: [u8; 8] = [0, 1, 2, 5, 5, 5, 1, 2];
+        let v4: [u8; 0] = [];
+        assert_eq!(efficient_replace(&a, &v3, &v4), vec![]);
+
+        let v5: [u8; 3] = [0, 1, 2];
+        let v6: [u8; 5] = [0, 1, 2, 3, 4];
+        assert_eq!(efficient_replace(&a, &v5, &v6), vec![0, 1, 2, 3, 4, 5, 5, 5, 1, 2]);
     }
 
     #[test]
