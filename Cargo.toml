@@ -11,6 +11,7 @@ path = "src/lib.rs"
 blake2 = "0.7"
 digest = { version = "0.7", features = ["std"]}
 stdweb = "0.4.4"
+rand = "0.4.2"
 
 [profile.release]
 lto = true

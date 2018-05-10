@@ -494,6 +494,7 @@ fn handle_client(
 
 pub fn server_start(local_ip: String) {
     let listener = TcpListener::bind(local_ip.clone()).unwrap();
+    let unsolved_requests = Arc::new(Mutex::new(HashMap::new()));
     for stream in listener.incoming() {
         if stream.is_err() {
             continue;
@@ -521,9 +522,8 @@ pub fn server_start(local_ip: String) {
             ),
         );
 
-        let unsolved_requests = Arc::new(Mutex::new(HashMap::new()));
-
-        thread::spawn(|| handle_client(stream.unwrap(), st, unsolved_requests));
+        let unsolved_requests_copy = unsolved_requests.clone();
+        thread::spawn(move || handle_client(stream.unwrap(), st, unsolved_requests_copy));
     }
 }
 
