@@ -285,14 +285,6 @@ enum VerifyStatus {
     Valid,
 }
 
-fn requires_cuckoo(_: &String) -> bool {
-    true
-}
-
-fn verified(_: &String) -> VerifyStatus {
-    VerifyStatus::Unverified
-}
-
 fn format_response_text(body: &String, content_type: &'static str) -> String {
     return format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n{}", body.len(), content_type, body);
 }
@@ -301,6 +293,39 @@ fn format_response_binary(mut body: Vec<u8>, content_type: &'static str) -> Vec<
     let mut header = format!("HTTP/1.1 200 OK\r\nCache-Control: no-cache, private\r\nContent-Length: {}\r\nContent-Type: {}\r\nConnection: close\r\n\r\n", body.len(), content_type).as_bytes().to_vec();
     header.append(&mut body);
     return header;
+}
+
+fn efficient_parse_header(orig_text: &[u8], text_to_find: &[u8]) -> Option<Vec<u8>> {
+    let len = orig_text.len();
+    let mut a = 0;
+
+    let mut header_value: Vec<u8> = Vec::new();
+
+    let mut appending: bool = false;
+
+    for i in 0..len {
+        let c = orig_text[i];
+
+        if appending {
+            if c == b'\r' {
+                return Some(header_value);
+            } else {
+                header_value.push(c);
+            }
+        } else {
+            if c == text_to_find[a] {
+                a += 1;
+            } else {
+                a = 0;
+            }
+        }
+
+        if a == text_to_find.len() {
+            appending = true;
+        }
+    }
+
+    return None;
 }
 
 fn efficient_replace(orig_text: &[u8], text_to_find: &[u8], replace_with: &[u8]) -> Vec<u8> {
@@ -381,6 +406,14 @@ impl<'a> Iterator for HeaderGenerator<'a> {
         }
         Some(self.tmp.pop().unwrap())
     }
+}
+
+fn requires_cuckoo(_: &String) -> bool {
+    true
+}
+
+fn verified(request: &String) -> VerifyStatus {
+    VerifyStatus::Unverified
 }
 
 fn handle_client(
