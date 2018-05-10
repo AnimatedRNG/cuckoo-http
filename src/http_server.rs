@@ -409,7 +409,7 @@ fn verified(request: &[u8]) -> VerifyStatus {
 }
 
 fn handle_client(
-    mut client_stream: TcpStream,
+    client_stream: TcpStream,
     cached_files: HashMap<StaticResource, Vec<u8>>,
     unsolved_requests: Arc<Mutex<RequestMap>>,
 ) {
