@@ -196,7 +196,7 @@ impl HTTPRead {
         };
     }
 
-    fn next(&mut self) -> Option<(String, String)> {
+    fn next(&mut self) -> Option<(Vec<u8>, Vec<u8>)> {
         let mut result: Vec<u8> = Vec::new();
 
         self.content_length_ptr = 0;
@@ -261,21 +261,7 @@ impl HTTPRead {
             };
         }
 
-        let str_result = match str::from_utf8(&result) {
-            Err(_) => None,
-            Ok(s) => Some(s.to_string()),
-        };
-
-        let url_result = match str::from_utf8(&self.tmp_url_buffer) {
-            Err(_) => None,
-            Ok(s) => Some(s.to_string()),
-        };
-
-        if str_result.is_some() && url_result.is_some() {
-            Some((str_result.unwrap(), url_result.unwrap()))
-        } else {
-            None
-        }
+        Some((result, self.tmp_url_buffer.clone()))
     }
 }
 
@@ -408,12 +394,18 @@ impl<'a> Iterator for HeaderGenerator<'a> {
     }
 }
 
-fn requires_cuckoo(_: &String) -> bool {
+fn requires_cuckoo(_: &[u8]) -> bool {
     true
 }
 
-fn verified(request: &String) -> VerifyStatus {
-    VerifyStatus::Unverified
+fn verified(request: &[u8]) -> VerifyStatus {
+    let res = efficient_parse_header(request, b"X-Cuckoo-Solution: ");
+    if res.is_some() {
+        // Verify request here
+        VerifyStatus::Valid
+    } else {
+        VerifyStatus::Unverified
+    }
 }
 
 fn handle_client(
@@ -445,10 +437,10 @@ fn handle_client(
         }
         let (msg, url) = msg_raw.unwrap();
 
-        println!("{}", msg);
-        println!("URL: {}", url);
+        //println!("{:?}", msg);
+        //println!("URL: {:?}", url);
 
-        if url == "/web_miner.wasm" {
+        if url == b"/web_miner.wasm" {
             // TODO: Take this conversion out of HTTP request handling...
             let m = cached_files.get(&StaticResource::WebMinerWasm).unwrap();
 
@@ -459,7 +451,7 @@ fn handle_client(
             }
 
             return;
-        } else if url == "/web_miner.js" {
+        } else if url == b"/web_miner.js" {
             let m = cached_files.get(&StaticResource::WebMinerJS).unwrap();
 
             if h.write(m).is_err() {
@@ -562,7 +554,7 @@ pub fn server_start(local_ip: String) {
 
 #[cfg(test)]
 mod tests {
-    use http_server::{efficient_replace, server_start};
+    use http_server::{efficient_parse_header, efficient_replace, server_start};
     use std::io::Write;
     use std::net::TcpStream;
     use std::sync::mpsc;
@@ -600,6 +592,17 @@ mod tests {
             efficient_replace(&a, &v5, &v6),
             vec![0, 1, 2, 3, 4, 5, 5, 5, 1, 2]
         );
+    }
+
+    #[test]
+    fn efficient_parse_header_works() {
+        let a = b"Example Header Here: Test Value\r\n";
+        let b = b"Example Header Here: ";
+        assert_eq!(&efficient_parse_header(a, b).unwrap(), b"Test Value");
+
+        let c = b"Cuckoo Header: abcde f1234\r\n";
+        let d = b"Cuckoo Header: ";
+        assert_eq!(&efficient_parse_header(c, d).unwrap(), b"abcde f1234");
     }
 
     #[test]
