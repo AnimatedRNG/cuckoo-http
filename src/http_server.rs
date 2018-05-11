@@ -376,7 +376,9 @@ impl<'a> HeaderGenerator<'a> {
                 let u = &mut self.u8_gen;
                 let a = u.take(HEADER_LENGTH).collect::<Vec<char>>();
                 let mut c: [u8; HEADER_LENGTH] = [0; HEADER_LENGTH];
-                let a_bytes: Vec<u8> = a.into_iter().map(|q| q as u8).collect();
+                let a_bytes: Vec<u8> = a.into_iter()
+                    .map(|q| if q == '\r' { b'R' } else { q as u8 })
+                    .collect();
                 &c.clone_from_slice(&a_bytes);
                 self.tmp.push(c);
             }
