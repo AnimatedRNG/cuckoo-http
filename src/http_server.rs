@@ -399,12 +399,18 @@ fn requires_cuckoo(_: &[u8]) -> bool {
 }
 
 fn verified(request: &[u8]) -> VerifyStatus {
+    println!("Request: {}", str::from_utf8(request).unwrap());
     let res = efficient_parse_header(request, b"X-Cuckoo-Solution: ");
-    if res.is_some() {
-        // Verify request here
-        VerifyStatus::Valid
-    } else {
-        VerifyStatus::Unverified
+    println!("Res: {:?}", res);
+    match res {
+        Some(sols_str) => {
+            // Verify request here
+
+            println!("{:?}", sols_str);
+
+            VerifyStatus::Valid
+        }
+        None => VerifyStatus::Unverified,
     }
 }
 
