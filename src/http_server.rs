@@ -29,7 +29,7 @@ struct TCPRead {
 impl TCPRead {
     #[inline]
     fn get(&mut self) -> Option<u8> {
-        if self.buf_ptr == self.end_of_read {
+        if self.buf_ptr >= self.end_of_read {
             match self.tcp_stream.read(&mut self.buf) {
                 Err(_) => {
                     self.tcp_stream.shutdown(Shutdown::Both).unwrap();
@@ -487,7 +487,7 @@ fn handle_client(
             return;
         }
 
-        match verified(unsolved_requests, &msg) {
+        match verified(unsolved_requests.clone(), &msg) {
             VerifyStatus::Unverified => {
                 if requires_cuckoo(&url) {
                     // Reply with request details
