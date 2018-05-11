@@ -357,12 +357,13 @@ enum StaticResource {
     WebMinerHtml,
 }
 
+#[derive(Clone)]
 struct CuckooProblem {
     easipct: i32,
     difficulty: f64,
 }
 
-type RequestMap = HashMap<[u8; HEADER_LENGTH], CuckooProblem>;
+type RequestMap = HashMap<Vec<u8>, CuckooProblem>;
 
 struct HeaderGenerator<'a> {
     u8_gen: AsciiGenerator<'a, ThreadRng>,
@@ -401,15 +402,29 @@ fn requires_cuckoo(_: &[u8]) -> bool {
     true
 }
 
-fn verified(request: &[u8]) -> VerifyStatus {
-    println!("Request: {}", str::from_utf8(request).unwrap());
-    let res = efficient_parse_header(request, b"X-Cuckoo-Solution: ");
-    println!("Res: {:?}", res);
+fn verified(unsolved_requests: Arc<Mutex<RequestMap>>, request: &[u8]) -> VerifyStatus {
+    let res = efficient_parse_header(request, b"X-Cuckoo-Header: ");
     match res {
-        Some(sols_str) => {
+        Some(header_bytes) => {
             // Verify request here
 
-            println!("{:?}", sols_str);
+            let p: CuckooProblem;
+            {
+                let unlocked = unsolved_requests.lock().unwrap();
+                let p_raw: Option<&CuckooProblem> = unlocked.get(&header_bytes);
+
+                match p_raw {
+                    None => {
+                        return VerifyStatus::Invalid;
+                    }
+                    Some(p_unwrapped) => {
+                        p = (*p_unwrapped).clone();
+                    }
+                }
+            }
+
+            println!("{:?}", str::from_utf8(&header_bytes).unwrap());
+            let solution = efficient_parse_header(request, b"X-Cuckoo-Solution: ");
 
             VerifyStatus::Valid
         }
@@ -472,7 +487,7 @@ fn handle_client(
             return;
         }
 
-        match verified(&msg) {
+        match verified(unsolved_requests, &msg) {
             VerifyStatus::Unverified => {
                 if requires_cuckoo(&url) {
                     // Reply with request details
@@ -501,7 +516,7 @@ fn handle_client(
                         unsolved_requests
                             .lock()
                             .unwrap()
-                            .insert(new_header, problem);
+                            .insert(new_header.to_vec(), problem);
                     }
 
                     if h.write(&m).is_err() {
