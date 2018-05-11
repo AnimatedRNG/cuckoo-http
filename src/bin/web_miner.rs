@@ -1,3 +1,5 @@
+#![recursion_limit = "128"]
+
 #[macro_use]
 extern crate stdweb;
 
@@ -51,7 +53,7 @@ fn main() {
         alert( @{message.clone()} );
     }
 
-    let req = XmlHttpRequest::new();
+    /*let req = XmlHttpRequest::new();
 
     req.open("GET", "/").unwrap();
     req.set_request_header("X-Cuckoo-Header", &header).unwrap();
@@ -80,14 +82,32 @@ fn main() {
         }
     }
 
-    let result = req.response_text().unwrap();
+    let result = req.response_text().unwrap();*/
 
     js! {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", '/', true);
+        xhr.setRequestHeader("X-Cuckoo-Header", @{header});
+        xhr.setRequestHeader("X-Cuckoo-Solution", @{message.trim()});
+
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {
+                alert("Got response!");
+                document.open();
+                document.write(this.responseText);
+                document.close();
+            }
+        };
+
+        xhr.send("");
+    }
+
+    /*js! {
         alert("Got response!");
         document.open();
         document.write( @{result} );
         document.close();
-    }
+    }*/
 
     stdweb::event_loop();
 }

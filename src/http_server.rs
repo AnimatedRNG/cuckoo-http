@@ -1,4 +1,4 @@
-use rand::{thread_rng, Generator, Rng, ThreadRng};
+use rand::{thread_rng, AsciiGenerator, Rng, ThreadRng};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -365,7 +365,7 @@ struct CuckooProblem {
 type RequestMap = HashMap<[u8; HEADER_LENGTH], CuckooProblem>;
 
 struct HeaderGenerator<'a> {
-    u8_gen: Generator<'a, u8, ThreadRng>,
+    u8_gen: AsciiGenerator<'a, ThreadRng>,
     tmp: Vec<[u8; HEADER_LENGTH]>,
 }
 
@@ -374,9 +374,10 @@ impl<'a> HeaderGenerator<'a> {
         if self.tmp.len() == 0 {
             for _ in 0..RNG_BUF_SIZE {
                 let u = &mut self.u8_gen;
-                let a = u.take(HEADER_LENGTH).collect::<Vec<u8>>();
+                let a = u.take(HEADER_LENGTH).collect::<Vec<char>>();
                 let mut c: [u8; HEADER_LENGTH] = [0; HEADER_LENGTH];
-                &c.clone_from_slice(&a);
+                let a_bytes: Vec<u8> = a.into_iter().map(|q| q as u8).collect();
+                &c.clone_from_slice(&a_bytes);
                 self.tmp.push(c);
             }
         }
@@ -427,7 +428,7 @@ fn handle_client(
         .unwrap();
 
     let mut rng = thread_rng();
-    let u8_gen = rng.gen_iter::<u8>();
+    let u8_gen = rng.gen_ascii_chars();
     let mut h_gen = HeaderGenerator {
         u8_gen: u8_gen,
         tmp: Vec::new(),
