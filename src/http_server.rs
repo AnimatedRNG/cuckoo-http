@@ -458,6 +458,11 @@ fn verified(unsolved_requests: Arc<Mutex<RequestMap>>, request: &[u8]) -> Verify
                 }
             }
 
+            {
+                let mut unlocked = unsolved_requests.lock().unwrap();
+                unlocked.remove(&header_bytes);
+            }
+
             if cuckoo::verify(
                 cuckoo::hash_header(&header_bytes),
                 solution,
