@@ -57,6 +57,7 @@ fn main() {
         xhr.open("GET", '/', true);
         xhr.setRequestHeader("X-Cuckoo-Header", @{header});
         xhr.setRequestHeader("X-Cuckoo-Solution", @{message.trim()});
+        xhr.setRequestHeader("X-Cuckoo-Original-Request", @{msg});
 
         xhr.onreadystatechange = function () {
             if (xhr.readyState == XMLHttpRequest.DONE && xhr.status == 200) {

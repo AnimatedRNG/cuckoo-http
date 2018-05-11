@@ -575,10 +575,11 @@ fn handle_client(
                 }
             }
             VerifyStatus::Invalid => {
-                // Drop the connection
+                h.close();
             }
             VerifyStatus::Valid => {
                 // Forward sub-message to the server
+                h.close();
             }
         }
     }
