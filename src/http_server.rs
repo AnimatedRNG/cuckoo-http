@@ -8,7 +8,10 @@ use std::str;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use std::u64;
 use std::vec::Vec;
+
+use cuckoo;
 
 const BUF_SIZE: usize = 8192;
 const CONTENT_LENGTH: &[u8] = b"Content-Length:";
@@ -423,10 +426,50 @@ fn verified(unsolved_requests: Arc<Mutex<RequestMap>>, request: &[u8]) -> Verify
                 }
             }
 
-            println!("{:?}", str::from_utf8(&header_bytes).unwrap());
-            let solution = efficient_parse_header(request, b"X-Cuckoo-Solution: ");
+            let easiness: i32 = ((p.easipct as i64 * cuckoo::NNODES as i64) / 100) as i32;
+            let hash_difficulty: u64 = ((p.difficulty / 100.0) * u64::MAX as f64) as u64;
 
-            VerifyStatus::Valid
+            //println!("{:?}", str::from_utf8(&header_bytes).unwrap());
+            let solution_raw = efficient_parse_header(request, b"X-Cuckoo-Solution: ");
+            let mut solution: cuckoo::Proof = [0; cuckoo::PROOFSIZE];
+
+            match solution_raw {
+                None => {
+                    return VerifyStatus::Invalid;
+                }
+                Some(sol) => {
+                    // TODO: Figure out more efficient way to do this part
+                    let sol_str_raw = str::from_utf8(&sol);
+                    let sol_str: &str;
+                    match sol_str_raw {
+                        Err(_) => {
+                            return VerifyStatus::Invalid;
+                        }
+                        Ok(st) => {
+                            sol_str = st;
+                        }
+                    }
+
+                    let mut raw_nonces: Vec<i32> = sol_str
+                        .split(" ")
+                        .map(|a| i32::from_str_radix(a, 16).unwrap())
+                        .collect();
+                    solution.copy_from_slice(&mut raw_nonces);
+                }
+            }
+
+            if cuckoo::verify(
+                cuckoo::hash_header(&header_bytes),
+                solution,
+                easiness,
+                hash_difficulty,
+            ) {
+                println!("Verified!");
+                VerifyStatus::Valid
+            } else {
+                println!("Invalid!");
+                VerifyStatus::Invalid
+            }
         }
         None => VerifyStatus::Unverified,
     }

@@ -5,7 +5,7 @@ extern crate stdweb;
 
 extern crate cuckoo_http;
 
-use stdweb::web::{document, INode, XhrReadyState, XmlHttpRequest};
+use stdweb::web::{document, INode};
 
 use cuckoo_http::cuckoo;
 use cuckoo_http::simple_miner;
@@ -42,47 +42,15 @@ fn main() {
         cuckoo: vec![0; (1 + cuckoo::NNODES) as usize],
     });
 
-    let message = format!(
-        "Result: {}",
-        a.unwrap()
-            .into_iter()
-            .fold("".to_string(), |acc, &a| format!("{} {}", acc, a))
-    );
+    let message = a.unwrap()
+        .into_iter()
+        .map(|x| format!("{:x} ", x))
+        .collect::<Vec<_>>()
+        .concat();
 
     js! {
         alert( @{message.clone()} );
     }
-
-    /*let req = XmlHttpRequest::new();
-
-    req.open("GET", "/").unwrap();
-    req.set_request_header("X-Cuckoo-Header", &header).unwrap();
-    req.set_request_header("X-Cuckoo-Solution", message.trim())
-        .unwrap();
-    req.send_with_string(&msg).unwrap();
-
-    while req.ready_state() != XhrReadyState::Done {
-        let st = req.ready_state();
-        match st {
-            XhrReadyState::Loading => {
-                js! { alert("Loading!"); }
-            }
-            XhrReadyState::Opened => {
-                js! { alert("Opened!"); }
-            }
-            XhrReadyState::Unsent => {
-                js! { alert("Unsent!"); }
-            }
-            XhrReadyState::HeadersReceived => {
-                js! { alert("HeadersReceived!"); }
-            }
-            XhrReadyState::Done => {
-                js! { alert("Done!"); }
-            }
-        }
-    }
-
-    let result = req.response_text().unwrap();*/
 
     js! {
         var xhr = new XMLHttpRequest();
@@ -101,13 +69,6 @@ fn main() {
 
         xhr.send("");
     }
-
-    /*js! {
-        alert("Got response!");
-        document.open();
-        document.write( @{result} );
-        document.close();
-    }*/
 
     stdweb::event_loop();
 }
